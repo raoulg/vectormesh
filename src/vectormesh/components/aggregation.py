@@ -12,7 +12,7 @@ from abc import abstractmethod
 
 import torch
 from beartype import beartype
-from jaxtyping import Float, jaxtyped
+from jaxtyping import Float, jaxtyped, TypeCheckError
 from pydantic import ConfigDict
 from torch import Tensor
 
@@ -51,7 +51,6 @@ class BaseAggregator(VectorMeshComponent):
 
     model_config = ConfigDict(frozen=True)
 
-    @jaxtyped(typechecker=beartype)
     def __call__(
         self, embeddings: Float[Tensor, "batch chunks dim"]
     ) -> Float[Tensor, "batch dim"]:
@@ -70,14 +69,33 @@ class BaseAggregator(VectorMeshComponent):
             Input: (B, N, D) where B=batch, N=chunks, D=embedding_dim
             Output: (B, D)
         """
+        # Validate input dimensions with educational error messages
+        if embeddings.dim() != 3:
+            raise VectorMeshError(
+                message=f"Aggregator expects 3D input, got {embeddings.dim()}D tensor",
+                hint="Aggregators work on chunked embeddings (3D tensors). Your data appears to be 2D (already pooled).",
+                fix="If using a sentence-transformer, you don't need aggregation. Use `cache.get_embeddings()` directly."
+            )
+
+        # Call the internal jaxtyped method for shape validation
+        return self._call_with_type_safety(embeddings)
+
+    @jaxtyped(typechecker=beartype)
+    def _call_with_type_safety(
+        self, embeddings: Float[Tensor, "batch chunks dim"]
+    ) -> Float[Tensor, "batch dim"]:
+        """Internal method with jaxtyped safety for beartype validation."""
         return self._aggregate(embeddings)
 
     @abstractmethod
-    def _aggregate(self, embeddings: Tensor) -> Tensor:
+    def _aggregate(
+        self,
+        embeddings: Float[Tensor, "batch chunks dim"]  # FIXED: Was generic Tensor
+    ) -> Float[Tensor, "batch dim"]:
         """Core aggregation logic - override in subclasses.
 
         This is the only method you need to implement when extending BaseAggregator.
-        Simply return the aggregated tensor - no decorators or type annotations needed.
+        The input is guaranteed to be a 3D tensor since __call__() validates this.
 
         Args:
             embeddings: Input tensor of shape (batch, chunks, dim)
@@ -85,8 +103,9 @@ class BaseAggregator(VectorMeshComponent):
         Returns:
             Aggregated tensor of shape (batch, dim)
 
-        Note:
-            Type safety is handled by __call__() - you don't need decorators here.
+        Shapes:
+            Input: (B, C, D) where B=batch, C=chunks, D=embedding_dim
+            Output: (B, D)
         """
         pass
 
@@ -112,7 +131,10 @@ class MeanAggregator(BaseAggregator):
         ```
     """
 
-    def _aggregate(self, embeddings: Tensor) -> Tensor:
+    def _aggregate(
+        self,
+        embeddings: Float[Tensor, "batch chunks dim"]  # FIXED: Was generic Tensor
+    ) -> Float[Tensor, "batch dim"]:
         """Average embeddings across chunks dimension."""
         return torch.mean(embeddings, dim=1)
 
@@ -138,7 +160,10 @@ class MaxAggregator(BaseAggregator):
         ```
     """
 
-    def _aggregate(self, embeddings: Tensor) -> Tensor:
+    def _aggregate(
+        self,
+        embeddings: Float[Tensor, "batch chunks dim"]  # FIXED: Was generic Tensor
+    ) -> Float[Tensor, "batch dim"]:
         """Max pool embeddings across chunks dimension."""
         return torch.max(embeddings, dim=1).values
 

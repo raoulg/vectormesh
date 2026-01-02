@@ -1,48 +1,84 @@
 """Text vectorization components using HuggingFace models."""
 
-from typing import Optional
+from typing import Optional, Union, Literal, Any
+from pathlib import Path
 
 import torch
 from beartype.typing import List
 from jaxtyping import jaxtyped
 from beartype import beartype as typechecker
-from pydantic import ConfigDict
+from pydantic import ConfigDict, Field
 from sentence_transformers import SentenceTransformer
+from transformers import AutoTokenizer, AutoModel
 
 from vectormesh.base import VectorMeshComponent
 from vectormesh.errors import VectorMeshError
-from vectormesh.types import TwoDTensor
+from vectormesh.types import TwoDTensor, ThreeDTensor
+from vectormesh.utils.model_info import get_model_metadata, ModelMetadata
 
 
 class TextVectorizer(VectorMeshComponent):
-    """Vectorize text using HuggingFace sentence transformer models.
+    """HuggingFace text vectorizer with automatic 2D/3D detection.
 
-    This component wraps HuggingFace sentence-transformers for easy text embedding
-    generation with automatic device management and educational error handling.
+    Automatically detects whether a model produces 2D (sentence-transformers)
+    or 3D (raw transformers with chunking) output based on AutoConfig metadata.
 
     Args:
-        model_name: HuggingFace model identifier (e.g., 'sentence-transformers/all-MiniLM-L6-v2')
+        model_name: HuggingFace model identifier
+        auto_chunk: Whether to chunk texts longer than context window
+        chunk_size: Maximum tokens per chunk (overrides model's max_position_embeddings)
         device: Target device ('cuda', 'mps', 'cpu', or None for auto-detection)
 
     Example:
         ```python
+        # Sentence-transformer (2D output)
         vectorizer = TextVectorizer(model_name="sentence-transformers/all-MiniLM-L6-v2")
-        embeddings = vectorizer(["Hello world", "AI is amazing"])
-        # Returns: TwoDTensor with shape (2, 384)
+        embeddings = vectorizer(["Hello world"])  # Returns: TwoDTensor [1, 384]
+
+        # Raw transformer (3D output with chunking)
+        vectorizer = TextVectorizer(model_name="bert-base-uncased")
+        chunks = vectorizer(["Long document..."])  # Returns: ThreeDTensor [1, chunks, 768]
         ```
 
     Shapes:
-        Input: List[str] with N strings
-        Output: TwoDTensor (N, embedding_dim)
+        2D output: [batch, dim] where batch=N texts, dim=embedding_dimension
+        3D output: [batch, chunks, dim] where chunks=max_chunks across batch
     """
 
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     model_name: str
+    auto_chunk: bool = True
+    chunk_size: Optional[int] = None
     device: Optional[str] = None
 
-    # Private cached model instance (not part of Pydantic fields)
-    _model: Optional[SentenceTransformer] = None
+    # Private attributes (not part of Pydantic fields)
+    _metadata: Optional[ModelMetadata] = None
+    _model: Optional[Any] = None
+    _tokenizer: Optional[Any] = None
+
+    def model_post_init(self, __context):
+        """Initialize model and introspect metadata."""
+        # Get model metadata via AutoConfig (fast, no full model download)
+        self._metadata = get_model_metadata(self.model_name)
+
+        # Cache the metadata for properties
+        object.__setattr__(self, "_metadata", self._metadata)
+
+    @property
+    def output_mode(self) -> Literal["2d", "3d"]:
+        """Dimension of output tensors (2D for pooled, 3D for chunked)."""
+        return self._metadata.output_mode
+
+    @property
+    def embedding_dim(self) -> int:
+        """Dimension of embedding vectors."""
+        return self._metadata.hidden_size
+
+    @property
+    def context_window(self) -> int:
+        """Maximum tokens per chunk."""
+        return self.chunk_size or self._metadata.max_position_embeddings
 
     def _detect_device(self) -> str:
         """Auto-detect the best available device.
@@ -57,84 +93,138 @@ class TextVectorizer(VectorMeshComponent):
         else:
             return "cpu"
 
-    def _get_model(self) -> SentenceTransformer:
-        """Lazy-load and cache the sentence transformer model.
-
-        Returns:
-            Loaded SentenceTransformer instance
-
-        Raises:
-            VectorMeshError: If model loading fails with educational hints
-        """
-        # Use cached model if available
+    def _get_model_and_tokenizer(self):
+        """Lazy-load and cache the model and tokenizer."""
         if self._model is not None:
-            return self._model
+            # For 2D models, tokenizer is None and that's expected
+            if self._metadata.output_mode == "2d" or self._tokenizer is not None:
+                return self._model, self._tokenizer
 
         # Determine device
         target_device = self.device if self.device is not None else self._detect_device()
 
         try:
-            # Load model with device placement
-            model = SentenceTransformer(self.model_name, device=target_device)
-            # Cache the model (use object.__setattr__ to bypass frozen config)
-            object.__setattr__(self, "_model", model)
-            return model
+            if self._metadata.output_mode == "2d":
+                # Sentence-transformer with pooling
+                model = SentenceTransformer(self.model_name, device=target_device)
+                tokenizer = None  # SentenceTransformer handles tokenization internally
+            else:
+                # Raw transformer (requires manual pooling/chunking)
+                tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+                model = AutoModel.from_pretrained(self.model_name)
+                model = model.to(target_device)
 
-        except OSError as e:
-            # Model not found on HuggingFace Hub
-            raise VectorMeshError(
-                message=f"Failed to load model '{self.model_name}': {str(e)}",
-                hint="Invalid HuggingFace model identifier or network issue",
-                fix="Check model name at https://huggingface.co/models?library=sentence-transformers or try 'sentence-transformers/all-MiniLM-L6-v2'",
-            ) from e
+            # Cache both (use object.__setattr__ to bypass frozen config)
+            object.__setattr__(self, "_model", model)
+            object.__setattr__(self, "_tokenizer", tokenizer)
+
+            return model, tokenizer
 
         except Exception as e:
-            # Generic error
             raise VectorMeshError(
-                message=f"Unexpected error loading model '{self.model_name}': {str(e)}",
-                hint="Model loading failed unexpectedly",
-                fix="Check your internet connection and ensure the model is compatible with sentence-transformers",
+                message=f"Failed to load model '{self.model_name}': {str(e)}",
+                hint="Check that the model ID is correct and you have internet connectivity.",
+                fix=f"Try: `huggingface-cli download {self.model_name}` to test manually."
             ) from e
 
     @jaxtyped(typechecker=typechecker)
-    def __call__(
-        self, texts: List[str]
-    ) -> TwoDTensor:
-        """Encode a list of text strings into embeddings.
+    def __call__(self, texts: List[str]) -> Union[TwoDTensor, ThreeDTensor]:
+        """Vectorize texts with automatic dimension detection.
 
         Args:
             texts: List of text strings to vectorize
 
         Returns:
-            Tensor of shape (batch, embedding_dim) containing the embeddings
-
-        Raises:
-            VectorMeshError: If encoding fails with educational hints
+            TwoDTensor[batch, dim] if output_mode=="2d"
+            ThreeDTensor[batch, chunks, dim] if output_mode=="3d"
 
         Shapes:
-            Input: List[str] with N strings
-            Output: (N, embedding_dim)
+            2D output: [B, D] where B=batch_size, D=embedding_dim
+            3D output: [B, C, D] where C=max_chunks across batch
         """
+        if self.output_mode == "2d":
+            return self._vectorize_2d(texts)
+        else:
+            return self._vectorize_3d(texts)
+
+    def _vectorize_2d(self, texts: List[str]) -> TwoDTensor:
+        """Vectorize using sentence-transformers (pooled output)."""
+        model, _ = self._get_model_and_tokenizer()
+
         try:
-            # Get or load model
-            model = self._get_model()
+            embeddings = model.encode(
+                texts,
+                convert_to_tensor=True,
+                show_progress_bar=False,
+                device=self.device
+            )
+            return embeddings  # Shape: [batch, dim]
+        except Exception as e:
+            raise VectorMeshError(
+                message=f"Failed to encode texts with 2D model: {str(e)}",
+                hint="Text encoding failed - check that inputs are valid strings",
+                fix="Ensure all texts are non-empty strings and the model loaded correctly",
+            ) from e
 
-            # Encode texts (returns NumPy array)
-            embeddings_np = model.encode(texts)
+    def _vectorize_3d(self, texts: List[str]) -> ThreeDTensor:
+        """Vectorize using raw transformers with chunking."""
+        model, tokenizer = self._get_model_and_tokenizer()
 
-            # Convert to PyTorch tensor
-            embeddings_tensor = torch.from_numpy(embeddings_np).float()
+        try:
+            all_chunks = []
+            max_chunks = 0
 
-            return embeddings_tensor
+            for text in texts:
+                # Tokenize and chunk
+                tokens = tokenizer(
+                    text,
+                    truncation=False,
+                    return_tensors="pt",
+                    padding=False
+                )["input_ids"][0]
 
-        except VectorMeshError:
-            # Re-raise our custom errors as-is
-            raise
+                # Split into chunks
+                chunks = self._split_into_chunks(tokens, self.context_window)
+
+                # Embed each chunk
+                chunk_embeddings = []
+                for chunk in chunks:
+                    outputs = model(chunk.unsqueeze(0).to(model.device))
+                    # Use mean pooling over tokens (not CLS)
+                    embedding = outputs.last_hidden_state.mean(dim=1)  # [1, dim]
+                    chunk_embeddings.append(embedding)
+
+                # Stack chunks for this document
+                doc_chunks = torch.cat(chunk_embeddings, dim=0)  # [num_chunks, dim]
+                all_chunks.append(doc_chunks)
+                max_chunks = max(max_chunks, len(chunks))
+
+            # Pad all documents to max_chunks
+            padded_chunks = []
+            for doc_chunks in all_chunks:
+                if len(doc_chunks) < max_chunks:
+                    padding = torch.zeros(
+                        max_chunks - len(doc_chunks),
+                        self.embedding_dim,
+                        device=doc_chunks.device
+                    )
+                    doc_chunks = torch.cat([doc_chunks, padding], dim=0)
+                padded_chunks.append(doc_chunks)
+
+            result = torch.stack(padded_chunks, dim=0)  # [batch, max_chunks, dim]
+            return result
 
         except Exception as e:
-            # Catch any encoding errors
             raise VectorMeshError(
-                message=f"Failed to encode texts: {str(e)}",
-                hint="Text encoding failed - check that inputs are valid strings",
-                fix="Ensure all texts are non-empty strings and the model is loaded correctly",
+                message=f"Failed to encode texts with 3D model: {str(e)}",
+                hint="Text chunking and encoding failed - check inputs and model compatibility",
+                fix="Ensure texts are valid and model supports the chunking strategy",
             ) from e
+
+    def _split_into_chunks(self, tokens: torch.Tensor, chunk_size: int) -> List[torch.Tensor]:
+        """Split token sequence into fixed-size chunks."""
+        chunks = []
+        for i in range(0, len(tokens), chunk_size):
+            chunk = tokens[i:i + chunk_size]
+            chunks.append(chunk)
+        return chunks

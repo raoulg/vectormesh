@@ -10,6 +10,7 @@ from .components.aggregation import (
 )
 from .components.vectorizers import TextVectorizer
 from .data import VectorCache
+from . import zoo
 
 __all__ = [
     "VectorMeshComponent",
@@ -24,6 +25,7 @@ __all__ = [
     "get_aggregator",
     "TextVectorizer",
     "VectorCache",
+    "zoo",
 ]
 
 def main() -> None:

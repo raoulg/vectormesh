@@ -46,7 +46,8 @@ development_status:
   1-2-huggingface-textvectorizer: review
   1-3-vectorcache-persistence-storage: review
   1-4-parameter-free-aggregation: review
-  1-5-mcp-server-basic: backlog
+  1-5-model-introspection-2d-3d-support: review  # NEW: Architecture fix for 2D/3D support
+  # NOTE: Old 1-5-mcp-server-basic moved to Epic 5 (requires docstrings generation)
   epic-1-retrospective: optional
 
   # Epic 2: Advanced Composition & Architecture
