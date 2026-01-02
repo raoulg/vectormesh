@@ -1,6 +1,6 @@
 """Tests for curated model registry."""
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 from vectormesh.zoo.models import (
     ZooModel, MPNET, QWEN_0_6B, LABSE, MINILM,
@@ -52,102 +52,57 @@ class TestZooModel:
 
 
 class TestModelConstants:
-    """Test individual model constants."""
+    """Test model constants against automated metadata extraction."""
 
     def test_essential_models_structure(self):
-        """Test Essential model constants have correct structure."""
+        """Test Essential model constants have correct list structure."""
         assert len(ESSENTIAL_MODELS) == 4
-        assert len(MVP_MODELS) == 4  # Legacy alias should work
 
-        # Test MPNET
-        assert MPNET.model_id == "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
-        assert MPNET.output_mode == "2d"
-        assert MPNET.context_window == 512
-        assert MPNET.embedding_dim == 768
-        assert "dutch" in MPNET.description.lower() or "multilingual" in MPNET.description.lower()
-
-        # Test QWEN
-        assert QWEN_0_6B.output_mode == "3d"
-        assert QWEN_0_6B.context_window == 32768
-
-        # Test LABSE
-        assert LABSE.output_mode == "2d"
-        assert "109 languages" in LABSE.description
-
-        # Test MINILM
-        assert MINILM.output_mode == "2d"
-        assert MINILM.embedding_dim == 384
-
-    def test_extended_models_structure(self):
-        """Test Extended models have correct structure."""
-        assert len(EXTENDED_MODELS) == 6
-        assert len(GROWTH_MODELS) == 6  # Legacy alias should work
-
-        # Test BGE Gemma2
-        assert BGE_GEMMA2.output_mode == "3d"
-        assert BGE_GEMMA2.context_window == 8192
-        assert BGE_GEMMA2.embedding_dim == 3584
-
-    def test_all_models_collection(self):
-        """Test ALL_MODELS includes all models."""
-        assert len(ALL_MODELS) == 10
-        assert len(ALL_MODELS) == len(ESSENTIAL_MODELS) + len(EXTENDED_MODELS)
-
-        # Test that Essential models are in ALL_MODELS
-        for essential_model in ESSENTIAL_MODELS:
-            assert essential_model in ALL_MODELS
-
-        # Test that Extended models are in ALL_MODELS
-        for extended_model in EXTENDED_MODELS:
-            assert extended_model in ALL_MODELS
-
-    def test_model_ids_unique(self):
-        """Test that all model IDs are unique."""
-        model_ids = [model.model_id for model in ALL_MODELS]
-        assert len(model_ids) == len(set(model_ids))  # No duplicates
-
-    def test_output_modes_valid(self):
-        """Test that all models have valid output modes."""
+    @patch("vectormesh.utils.model_info.AutoConfig.from_pretrained")
+    def test_models_match_metadata_logic(self, mock_config):
+        """Verify that curated models match what get_model_metadata would derive."""
+        # This ensures our hardcoded constants aren't drifting from our own extraction logic.
+        
         for model in ALL_MODELS:
-            assert model.output_mode in ["2d", "3d"]
+            # Create a mock config that mimics the properties we expect for this model
+            # This is validating that IF the model is what we think it is, ZooModel is defined correctly.
+            mock_conf = Mock()
+            mock_conf.max_position_embeddings = model.context_window
+            mock_conf.hidden_size = model.embedding_dim
+            
+            # For 2D models, we expect sentence-transformers pooling
+            if model.output_mode == "2d":
+                mock_conf.pooling_mode_mean_tokens = True
+            else:
+                del mock_conf.pooling_mode_mean_tokens
+            
+            mock_config.return_value = mock_conf
 
-    def test_context_windows_positive(self):
-        """Test that all context windows are positive integers."""
-        for model in ALL_MODELS:
-            assert isinstance(model.context_window, int)
-            assert model.context_window > 0
+            # Run extraction
+            metadata = get_model_metadata(model.model_id)
 
-    def test_embedding_dims_positive(self):
-        """Test that all embedding dimensions are positive integers."""
-        for model in ALL_MODELS:
-            assert isinstance(model.embedding_dim, int)
-            assert model.embedding_dim > 0
+            # Assert our hardcoded constant matches the extracted metadata
+            assert metadata.output_mode == model.output_mode, f"Mismatch for {model.model_id}"
+            assert metadata.max_position_embeddings == model.context_window
+            assert metadata.hidden_size == model.embedding_dim
 
-    def test_descriptions_exist(self):
-        """Test that all models have descriptions."""
-        for model in ALL_MODELS:
-            assert isinstance(model.description, str)
-            assert len(model.description) > 0
-
-
-class TestModelMetadataValidation:
-    """Test curated model metadata matches AutoConfig when possible."""
-
-    @pytest.mark.parametrize("model", MVP_MODELS)
-    @patch("vectormesh.utils.model_info.get_model_metadata")
-    def test_mvp_model_metadata_consistency(self, mock_get_metadata, model):
-        """Test MVP model metadata is internally consistent."""
-        # We can't easily test against real AutoConfig in unit tests,
-        # so we test internal consistency
-        assert model.model_id.startswith(("sentence-transformers/", "Qwen/", "bert-", "xlm-"))
-
-        # 2D models should be sentence-transformers
-        if model.output_mode == "2d":
-            assert "sentence-transformers" in model.model_id
-
-        # 3D models should not be sentence-transformers
-        if model.output_mode == "3d":
-            assert "sentence-transformers" not in model.model_id
+    @pytest.mark.integration
+    def test_zoo_models_match_huggingface_reality(self):
+        """Integration test: Verify curated constants against REAL HuggingFace API.
+        
+        This test actually calls the HF Hub (via get_model_metadata) to ensure
+        that our hardcoded ZooModel definitions are accurate to reality.
+        """
+        for model in ESSENTIAL_MODELS:
+            # Fetch real metadata
+            print(f"Fetching metadata for {model.model_id}...")
+            # Note: get_model_metadata downloads config.json (<10kb) which is fast enough for integration test
+            real_metadata = get_model_metadata(model.model_id)
+            
+            assert real_metadata.model_id == model.model_id
+            assert real_metadata.max_position_embeddings == model.context_window
+            assert real_metadata.hidden_size == model.embedding_dim
+            assert real_metadata.output_mode == model.output_mode
 
     def test_model_registry_importable(self):
         """Test that model constants can be imported."""

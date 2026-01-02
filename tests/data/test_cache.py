@@ -8,7 +8,7 @@ import pytest
 import torch
 
 from vectormesh.data.cache import VectorCache
-from vectormesh.components.vectorizers import TextVectorizer
+from vectormesh.components.vectorizers import BaseVectorizer, TwoDVectorizer, ThreeDVectorizer
 from vectormesh.errors import VectorMeshError
 
 
@@ -49,9 +49,10 @@ class TestVectorCache:
     def test_vectorcache_create_basic(self, tmp_path):
         """Test basic cache creation."""
         # Mock vectorizer
-        mock_vectorizer = Mock(spec=TextVectorizer)
+        mock_vectorizer = Mock(spec=BaseVectorizer)
         mock_vectorizer.return_value = torch.tensor([[0.1] * 384, [0.2] * 384])
         mock_vectorizer.model_name = "test-model"  # Add model_name attribute
+        mock_vectorizer.output_mode = "2d"  # Add output_mode attribute
 
         texts = ["text1", "text2"]
 
@@ -68,8 +69,9 @@ class TestVectorCache:
 
     def test_vectorcache_batch_processing(self, tmp_path):
         """Test that texts are processed in batches."""
-        mock_vectorizer = Mock(spec=TextVectorizer)
+        mock_vectorizer = Mock(spec=BaseVectorizer)
         mock_vectorizer.model_name = "test-model"  # Add model_name attribute
+        mock_vectorizer.output_mode = "2d"  # Add output_mode attribute
         # Return different embeddings for each batch
         mock_vectorizer.side_effect = [
             torch.tensor([[0.1] * 384, [0.2] * 384]),  # Batch 1
@@ -92,7 +94,9 @@ class TestVectorCache:
 
     def test_vectorcache_atomic_creation(self, tmp_path):
         """Test atomic creation pattern - no partial corruption."""
-        mock_vectorizer = Mock(spec=TextVectorizer)
+        mock_vectorizer = Mock(spec=BaseVectorizer)
+        mock_vectorizer.output_mode = "2d"
+        mock_vectorizer.model_name = "test-model"
         mock_vectorizer.side_effect = Exception("Simulated failure")
 
         texts = ["text1", "text2"]
@@ -113,9 +117,10 @@ class TestVectorCache:
 
     def test_vectorcache_metadata_creation(self, tmp_path):
         """Test metadata.json is created with correct info."""
-        mock_vectorizer = Mock(spec=TextVectorizer)
+        mock_vectorizer = Mock(spec=BaseVectorizer)
         mock_vectorizer.return_value = torch.tensor([[0.1] * 384, [0.2] * 384])
         mock_vectorizer.model_name = "test-model"
+        mock_vectorizer.output_mode = "2d"
 
         texts = ["text1", "text2"]
 
@@ -133,6 +138,7 @@ class TestVectorCache:
             metadata = json.load(f)
 
         assert metadata["model_name"] == "test-model"
+        assert metadata["output_mode"] == "2d"
         assert metadata["num_samples"] == 2
         assert metadata["embedding_dim"] == 384
         assert "created_at" in metadata
@@ -140,9 +146,10 @@ class TestVectorCache:
     def test_vectorcache_load_existing(self, tmp_path):
         """Test loading an existing cache."""
         # First create a cache
-        mock_vectorizer = Mock(spec=TextVectorizer)
+        mock_vectorizer = Mock(spec=BaseVectorizer)
         mock_vectorizer.return_value = torch.tensor([[0.1] * 384, [0.2] * 384])
         mock_vectorizer.model_name = "test-model"
+        mock_vectorizer.output_mode = "2d"
 
         VectorCache.create(
             texts=["text1", "text2"],
@@ -156,6 +163,7 @@ class TestVectorCache:
 
         assert loaded_cache.name == "test_load"
         assert loaded_cache.cache_dir == tmp_path
+        assert loaded_cache.output_mode == "2d"
 
     def test_vectorcache_load_nonexistent_raises_error(self, tmp_path):
         """Test that loading nonexistent cache raises error."""
@@ -167,10 +175,11 @@ class TestVectorCache:
 
     def test_vectorcache_get_embeddings(self, tmp_path):
         """Test retrieving embeddings from cache."""
-        mock_vectorizer = Mock(spec=TextVectorizer)
+        mock_vectorizer = Mock(spec=BaseVectorizer)
         embeddings = torch.tensor([[0.1] * 384, [0.2] * 384, [0.3] * 384])
         mock_vectorizer.return_value = embeddings
         mock_vectorizer.model_name = "test-model"
+        mock_vectorizer.output_mode = "2d"
 
         cache = VectorCache.create(
             texts=["text1", "text2", "text3"],
@@ -196,7 +205,8 @@ class TestVectorCache:
 
     def test_vectorcache_empty_texts_handling(self, tmp_path):
         """Test handling of empty text list."""
-        mock_vectorizer = Mock(spec=TextVectorizer)
+        mock_vectorizer = Mock(spec=BaseVectorizer)
+        mock_vectorizer.output_mode = "2d"
 
         with pytest.raises(VectorMeshError) as exc_info:
             VectorCache.create(
@@ -236,7 +246,7 @@ class TestVectorCache:
         assert all(isinstance(t, str) for t in texts)
 
         # Create real vectorizer
-        vectorizer = TextVectorizer(
+        vectorizer = TwoDVectorizer(
             model_name="sentence-transformers/all-MiniLM-L6-v2"
         )
 
@@ -256,6 +266,7 @@ class TestVectorCache:
         # Verify metadata
         metadata = cache.get_metadata()
         assert metadata["model_name"] == "sentence-transformers/all-MiniLM-L6-v2"
+        assert metadata["output_mode"] == "2d"
         assert metadata["num_samples"] == 10
         assert metadata["embedding_dim"] == 384
 
@@ -275,6 +286,7 @@ class TestVectorCache:
         # Get embeddings from loaded cache
         loaded_embeddings = loaded_cache.get_embeddings()
         assert torch.allclose(embeddings, loaded_embeddings)
+        assert loaded_cache.output_mode == "2d"
 
         # Test partial retrieval
         partial = loaded_cache.get_embeddings(indices=[0, 5, 9])
@@ -282,7 +294,7 @@ class TestVectorCache:
 
     def test_vectorcache_aggregate_mean(self, tmp_path):
         """Test VectorCache.aggregate() with MeanAggregator strategy."""
-        mock_vectorizer = Mock(spec=TextVectorizer)
+        mock_vectorizer = Mock(spec=ThreeDVectorizer)
         # Return embeddings with 3D shape (batch=2, chunks=1, dim=4)
         embeddings = torch.tensor([
             [[1.0, 2.0, 3.0, 4.0]],
@@ -290,6 +302,7 @@ class TestVectorCache:
         ])
         mock_vectorizer.return_value = embeddings
         mock_vectorizer.model_name = "test-model"
+        mock_vectorizer.output_mode = "3d"
 
         cache = VectorCache.create(
             texts=["text1", "text2"],
@@ -306,7 +319,7 @@ class TestVectorCache:
 
     def test_vectorcache_aggregate_max(self, tmp_path):
         """Test VectorCache.aggregate() with MaxAggregator strategy."""
-        mock_vectorizer = Mock(spec=TextVectorizer)
+        mock_vectorizer = Mock(spec=ThreeDVectorizer)
         # Return embeddings with 3D shape (batch=2, chunks=1, dim=4)
         embeddings = torch.tensor([
             [[1.0, 2.0, 3.0, 4.0]],
@@ -314,6 +327,7 @@ class TestVectorCache:
         ])
         mock_vectorizer.return_value = embeddings
         mock_vectorizer.model_name = "test-model"
+        mock_vectorizer.output_mode = "3d"
 
         cache = VectorCache.create(
             texts=["text1", "text2"],
@@ -330,10 +344,11 @@ class TestVectorCache:
 
     def test_vectorcache_aggregate_invalid_strategy(self, tmp_path):
         """Test that invalid aggregation strategy raises error."""
-        mock_vectorizer = Mock(spec=TextVectorizer)
+        mock_vectorizer = Mock(spec=ThreeDVectorizer)
         embeddings = torch.tensor([[[1.0, 2.0]]])
         mock_vectorizer.return_value = embeddings
         mock_vectorizer.model_name = "test-model"
+        mock_vectorizer.output_mode = "3d"
 
         cache = VectorCache.create(
             texts=["text"],
@@ -346,3 +361,24 @@ class TestVectorCache:
         from vectormesh.errors import VectorMeshError
         with pytest.raises(VectorMeshError):
             cache.aggregate(strategy="InvalidAggregator")
+
+    def test_vectorcache_aggregate_on_2d_raises_error(self, tmp_path):
+        """Test that calling aggregate on a 2D cache raises an error."""
+        mock_vectorizer = Mock(spec=BaseVectorizer)
+        mock_vectorizer.return_value = torch.randn(2, 384)
+        mock_vectorizer.model_name = "test-2d"
+        mock_vectorizer.output_mode = "2d"
+
+        cache = VectorCache.create(
+            texts=["text1", "text2"],
+            vectorizer=mock_vectorizer,
+            name="test_agg_2d",
+            cache_dir=tmp_path
+        )
+
+        from vectormesh.errors import VectorMeshError
+        with pytest.raises(VectorMeshError) as exc_info:
+            cache.aggregate()
+        
+        error = exc_info.value
+        assert "Cannot aggregate 2D embeddings" in str(error)
