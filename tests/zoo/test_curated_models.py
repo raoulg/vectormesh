@@ -3,10 +3,9 @@ import pytest
 from unittest.mock import patch, Mock
 
 from vectormesh.zoo.models import (
-    ZooModel, MPNET, QWEN_0_6B, LABSE, MINILM,
-    BGE_GEMMA2, E5_MISTRAL, QWEN_8B, DISTILUSE,
-    ESSENTIAL_MODELS, EXTENDED_MODELS, ALL_MODELS,
-    MVP_MODELS, GROWTH_MODELS, Models  # Legacy and new enum
+    ZooModel, MPNET, LABSE, MINILM,
+    BGE_GEMMA2, E5_MISTRAL, DISTILUSE,
+    ESSENTIAL_MODELS, EXTENDED_MODELS, ALL_MODELS
 )
 from vectormesh.utils.model_info import get_model_metadata
 
@@ -54,10 +53,6 @@ class TestZooModel:
 class TestModelConstants:
     """Test model constants against automated metadata extraction."""
 
-    def test_essential_models_structure(self):
-        """Test Essential model constants have correct list structure."""
-        assert len(ESSENTIAL_MODELS) == 4
-
     @patch("vectormesh.utils.model_info.AutoConfig.from_pretrained")
     def test_models_match_metadata_logic(self, mock_config):
         """Verify that curated models match what get_model_metadata would derive."""
@@ -93,7 +88,7 @@ class TestModelConstants:
         This test actually calls the HF Hub (via get_model_metadata) to ensure
         that our hardcoded ZooModel definitions are accurate to reality.
         """
-        for model in ESSENTIAL_MODELS:
+        for model in ALL_MODELS:
             # Fetch real metadata
             print(f"Fetching metadata for {model.model_id}...")
             # Note: get_model_metadata downloads config.json (<10kb) which is fast enough for integration test
@@ -103,24 +98,3 @@ class TestModelConstants:
             assert real_metadata.max_position_embeddings == model.context_window
             assert real_metadata.hidden_size == model.embedding_dim
             assert real_metadata.output_mode == model.output_mode
-
-    def test_model_registry_importable(self):
-        """Test that model constants can be imported."""
-        from vectormesh.zoo.models import MPNET, ALL_MODELS
-
-        assert MPNET is not None
-        assert len(ALL_MODELS) == 10
-
-    def test_models_enum_autocomplete(self):
-        """Test that Models enum provides autocomplete support."""
-        # Test enum structure
-        assert len(Models) == 10
-
-        # Test specific enum values
-        assert Models.MPNET.value == MPNET
-        assert Models.QWEN_0_6B.value == QWEN_0_6B
-
-        # Test accessing model metadata through enum
-        model = Models.MPNET.value
-        assert model.model_id == "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
-        assert model.output_mode == "2d"

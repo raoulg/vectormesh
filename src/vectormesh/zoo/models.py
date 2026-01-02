@@ -39,14 +39,6 @@ MPNET = ZooModel(
     description="Dutch support, 249M downloads, best general performance"
 )
 
-QWEN_0_6B = ZooModel(
-    model_id="Qwen/Qwen2.5-Coder-0.5B-Instruct",
-    context_window=32768,
-    embedding_dim=896,
-    output_mode="3d",  # No built-in pooling
-    description="32k context, CPU-friendly (0.5B params), multilingual"
-)
-
 LABSE = ZooModel(
     model_id="sentence-transformers/LaBSE",
     context_window=512,
@@ -80,18 +72,10 @@ E5_MISTRAL = ZooModel(
     description="32k context, English, 7B params"
 )
 
-QWEN_8B = ZooModel(
-    model_id="Qwen/Qwen2.5-Coder-7B-Instruct",
-    context_window=32768,
-    embedding_dim=4096,
-    output_mode="3d",
-    description="32k context, multilingual, 7B params"
-)
-
 DISTILUSE = ZooModel(
     model_id="sentence-transformers/distiluse-base-multilingual-cased-v2",
     context_window=512,
-    embedding_dim=512,
+    embedding_dim=768,
     output_mode="2d",
     description="Distilled, 134M params"
 )
@@ -113,13 +97,9 @@ XLMR_BASE = ZooModel(
 )
 
 # Model groups by use case
-ESSENTIAL_MODELS = [MPNET, QWEN_0_6B, LABSE, MINILM]  # Core 4 for immediate use
-EXTENDED_MODELS = [BGE_GEMMA2, E5_MISTRAL, QWEN_8B, DISTILUSE, BERT_MULTILINGUAL, XLMR_BASE]  # Additional 6 for specialized use
+ESSENTIAL_MODELS = [MPNET, LABSE, MINILM]  # Core 4 for immediate use
+EXTENDED_MODELS = [BGE_GEMMA2, E5_MISTRAL, DISTILUSE, BERT_MULTILINGUAL, XLMR_BASE]  # Additional 6 for specialized use
 ALL_MODELS = ESSENTIAL_MODELS + EXTENDED_MODELS
-
-# Legacy aliases for backward compatibility
-MVP_MODELS = ESSENTIAL_MODELS
-GROWTH_MODELS = EXTENDED_MODELS
 
 
 class Models(Enum):
@@ -133,16 +113,14 @@ class Models(Enum):
         vectorizer = TwoDVectorizer(model_name=model.model_id)
     """
 
-    # MVP Models
+    # Small Models
     MPNET = MPNET
-    QWEN_0_6B = QWEN_0_6B
     LABSE = LABSE
     MINILM = MINILM
 
-    # Growth Models
+    # Big Models
     BGE_GEMMA2 = BGE_GEMMA2
     E5_MISTRAL = E5_MISTRAL
-    QWEN_8B = QWEN_8B
     DISTILUSE = DISTILUSE
     BERT_MULTILINGUAL = BERT_MULTILINGUAL
     XLMR_BASE = XLMR_BASE

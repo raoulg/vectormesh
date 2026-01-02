@@ -9,7 +9,9 @@ from .components.aggregation import (
     get_aggregator,
 )
 from .components.vectorizers import BaseVectorizer, TwoDVectorizer, ThreeDVectorizer
+from .components.combinators import Serial, Parallel
 from .data import VectorCache
+from .validation import validate_composition, validate_parallel, MorphismComposition, Morphism, TensorDimensionality
 from . import zoo
 
 __all__ = [
@@ -26,7 +28,14 @@ __all__ = [
     "BaseVectorizer",
     "TwoDVectorizer",
     "ThreeDVectorizer",
+    "Serial",
+    "Parallel",
     "VectorCache",
+    "validate_composition",
+    "validate_parallel",
+    "MorphismComposition",
+    "Morphism",
+    "TensorDimensionality",
     "zoo",
 ]
 

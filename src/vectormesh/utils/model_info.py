@@ -1,7 +1,7 @@
 """Model introspection utilities for VectorMesh."""
 from pathlib import Path
 from typing import Literal, Optional
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict
 from transformers import AutoConfig
 from ..errors import VectorMeshError
 

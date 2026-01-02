@@ -7,6 +7,7 @@ from .aggregation import (
     get_aggregator,
 )
 from .vectorizers import BaseVectorizer, TwoDVectorizer, ThreeDVectorizer
+from .combinators import Serial, Parallel
 
 __all__ = [
     "BaseAggregator",
@@ -16,4 +17,6 @@ __all__ = [
     "BaseVectorizer",
     "TwoDVectorizer",
     "ThreeDVectorizer",
+    "Serial",
+    "Parallel",
 ]

@@ -12,7 +12,7 @@ from abc import abstractmethod
 
 import torch
 from beartype import beartype
-from jaxtyping import jaxtyped, TypeCheckError
+from jaxtyping import jaxtyped
 from pydantic import ConfigDict
 
 from vectormesh.base import VectorMeshComponent

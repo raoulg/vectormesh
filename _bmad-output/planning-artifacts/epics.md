@@ -17,7 +17,7 @@ This document provides the complete epic and story breakdown for vectormesh, dec
 
 ### Functional Requirements
 
-FR1: Implement `TextVectorizer` wrapper for HuggingFace models with uniform interface and auto-detection.
+FR1: Implement `TwoDVectorizer` and `ThreeDVectorizer` for HuggingFace models with uniform interface and auto-detection.
 FR2: Implement `RegexVectorizer` for creating binary vectors from pattern matches.
 FR3: Implement `VectorCache` with chunk-level storage (2DTensor) using HuggingFace Datasets (Parquet/Arrow).
 FR4: Implement `VectorMeshComponent` base class with Pydantic validation (v2+).
@@ -60,7 +60,7 @@ AR10: **MCP Framework**: Use `fastmcp` for building the MCP server (simpler/fast
 
 ### FR Coverage Map
 
-FR1 (TextVectorizer): Epic 1 (Core Tooling)
+FR1 (TwoDVectorizer/ThreeDVectorizer): Epic 1 (Core Tooling)
 FR2 (RegexVectorizer): Epic 3 (Extensible Vectorization)
 FR3 (VectorCache): Epic 1 (Core Tooling)
 FR4 (Component Base): Epic 1 (Core Tooling)
@@ -106,21 +106,26 @@ So that I catch shape errors early and enforce configuration validation.
 
 ---
 
-### Story 1.2: HuggingFace TextVectorizer
+### Story 1.2: HuggingFace TwoDVectorizer & ThreeDVectorizer
 As a researcher,
 I want to convert text to vectors using HuggingFace models without managing the model lifecycle,
 So that I can focus on the vectors, not the infrastructure.
 
 **Acceptance Criteria:**
 
-**Given** a `TextVectorizer` initialized with a supported model name (e.g., "sentence-transformers/all-MiniLM-L6-v2")
+**Given** a `TwoDVectorizer` initialized with a sentence-transformer model (e.g., "sentence-transformers/all-MiniLM-L6-v2")
 **When** I call it with a list of strings
 **Then** it automatically downloads the model (if missing)
 **And** moves it to the correct device (MPS on Mac, CUDA if available, else CPU)
-**And** returns a typed `OneDTensor` (batch, dim) of embeddings
+**And** returns a typed `TwoDTensor` (batch, dim) of embeddings
+
+**Given** a `ThreeDVectorizer` initialized with a raw transformer model
+**When** I call it with a list of strings
+**Then** it chunks long texts automatically
+**And** returns a typed `ThreeDTensor` (batch, chunks, dim) of embeddings
 
 **Given** an invalid model string
-**When** I initialize `TextVectorizer`
+**When** I initialize either vectorizer
 **Then** it raises a descriptive `VectorMeshError` (not a generic HF error)
 
 ---
@@ -183,6 +188,13 @@ So that my agents can vectorize text and query the cache.
 **Goal:** Enable users to build complex, branching architectures and combine multiple vector signals for sophisticated processing. This unlocks the true power of "vector mesh" composition.
 **FRs covered:** FR6, FR7, FR8, FR15, FR16, AR5, AR6
 
+**📋 Story Integration Dependencies:**
+- **Story 2.1**: Foundation - implements `Serial` and `Parallel` combinators with 2D/3D awareness
+- **Story 2.2**: Builds on 2.1 - `>>` operator compiles to `Serial` containers
+- **Story 2.3**: Builds on 2.1 - `GlobalConcat` consumes `Parallel` tuple outputs
+- **Story 2.4**: Builds on 2.1 - visualizes combinator structures and tensor flows
+- **Story 2.5**: Builds on 2.1 - gating integrates with combinator framework
+
 ### Story 2.1: Combinators (Serial/Parallel)
 As a machine learning engineer,
 I want explicit `Serial` and `Parallel` containers,
@@ -207,17 +219,23 @@ As a developer,
 I want to use `>>` to chain components,
 So that my code reads like a data flow pipeline.
 
+**Integration Note:** Depends on Story 2.1 `Serial` combinator implementation. The `>>` operator compiles to `Serial` containers created in Story 2.1.
+
 **Acceptance Criteria:**
 
-**Given** two components `comp1` and `comp2`
-**When** I write `pipeline = comp1 >> comp2`
-**Then** `pipeline` is an instance of `Serial` containing `[comp1, comp2]`
-**And** shape compatibility is checked immediately
+**Given** two components `TwoDVectorizer()` and `MeanProcessor()`
+**When** I write `pipeline = vectorizer >> processor`
+**Then** `pipeline` is an instance of `Serial` containing `[TwoDVectorizer(), MeanProcessor()]`
+**And** shape compatibility is checked immediately with 2D/3D awareness
 
-**Given** a `Serial` pipeline
+**Given** a `Serial` pipeline from Story 2.1
 **When** I use `>>` to add another component
 **Then** it returns a new `Serial` (flattened if possible)
-**And** the original objects remain uniform (immutable config preference)
+**And** the original objects remain immutable (frozen config from Story 2.1)
+
+**Given** mixed 2D/3D components
+**When** I write `ThreeDVectorizer("model") >> MeanAggregator() >> FinalProcessor()`
+**Then** it creates a `Serial` with proper 3D→2D→2D shape flow validation
 
 ---
 
@@ -226,16 +244,27 @@ As a model architect,
 I want typed `concat` and `stack` connectors,
 So that I can merge parallel branches into a single tensor for downstream processing.
 
+**Integration Note:** Depends on Story 2.1 `Parallel` combinator implementation. `GlobalConcat` must consume tuple outputs from `Parallel` containers and handle all 2D/3D combinations defined in Story 2.1.
+
 **Acceptance Criteria:**
 
-**Given** the output of a `Parallel` branch (list of tensors)
+**Given** a `Parallel` output tuple from Story 2.1 `(TwoDTensor, TwoDTensor)`
 **When** I apply `GlobalConcat(dim=-1)`
-**Then** it returns a single tensor with concatenated features
-**And** it validates that all other dimensions match (e.g., batch size)
+**Then** it returns a single `TwoDTensor` with concatenated features `[batch, combined_dim]`
+**And** it validates that batch dimensions match
 
-**Given** a `Serial` pipeline ending in `Parallel`
-**When** I append `>> GlobalConcat()`
-**Then** the final output is a single tensor
+**Given** a mixed `Parallel` output `(TwoDTensor, ThreeDTensor)` from Story 2.1
+**When** I apply `GlobalConcat(dim=-1)`
+**Then** it raises an educational `VectorMeshError` explaining 2D/3D incompatibility
+**And** suggests using aggregation first: "Hint: Use MeanAggregator() on 3D branch before concatenation"
+
+**Given** a `Serial` pipeline ending in `Parallel` from Story 2.1
+**When** I append `>> GlobalConcat(dim=-1)`
+**Then** the final output is a single tensor with proper dimension handling
+
+**Given** a normalized `Parallel` output `(TwoDTensor, TwoDTensor)` from `[TwoDVectorizer, Serial([ThreeDVectorizer, MeanAggregator])]`
+**When** I apply `GlobalConcat(dim=-1)`
+**Then** it concatenates successfully because aggregation normalized dimensions
 
 ---
 
@@ -244,12 +273,27 @@ As a user,
 I want to visualize my component graph,
 So that I can verify the topology and tensor shapes.
 
+**Integration Note:** Depends on Story 2.1 `Serial` and `Parallel` combinator implementations. Must visualize nested combinator structures and 2D/3D tensor flows defined in Story 2.1.
+
 **Acceptance Criteria:**
 
-**Given** a complex `Serial` pipeline
+**Given** a `Serial` pipeline from Story 2.1
 **When** I call `visualize(pipeline)`
-**Then** it prints a clear ASCII or text representation of the flow
-**And** it shows the input/output shapes between layers (e.g., `(B, 768) -> [Serial] -> (B, 128)`)
+**Then** it prints a clear ASCII representation showing: `TwoDVectorizer -> MeanProcessor -> [TwoDTensor(B,768) -> TwoDTensor(B,128)]`
+
+**Given** a `Parallel` structure from Story 2.1
+**When** I call `visualize(parallel_pipeline)`
+**Then** it shows branching topology:
+```
+Input[texts]
+├── TwoDVectorizer("model1") -> TwoDTensor(B,384)
+└── TwoDVectorizer("model2") -> TwoDTensor(B,768)
+Output: tuple[TwoDTensor, TwoDTensor]
+```
+
+**Given** nested combinators from Story 2.1 AC4c
+**When** I visualize the complex multi-level structure
+**Then** it shows the complete hierarchy with proper 2D/3D dimension flow tracking
 
 ---
 
@@ -258,16 +302,23 @@ As an advanced user,
 I want gating components (`Gate`, `GateSkip`),
 So that I can dynamically route data or apply residual connections based on vector content.
 
+**Integration Note:** Depends on Story 2.1 combinator framework. Gating components must inherit from `VectorMeshComponent` and integrate seamlessly with `Serial`/`Parallel` containers while respecting 2D/3D tensor flows.
+
 **Acceptance Criteria:**
 
-**Given** a "Main" path and a "Skip" path
-**When** I use `GateSkip(main=..., skip=...)`
-**Then** the outputs are combined (typically summed)
-**And** shape validation ensures `main` and `skip` outputs are compatible/broadcastable
+**Given** a "Main" path and a "Skip" path from Story 2.1 combinators
+**When** I use `GateSkip(main=Serial([...]), skip=TwoDVectorizer(...))`
+**Then** the outputs are combined (typically summed) with proper 2D/3D shape validation
+**And** it integrates with the combinator framework from Story 2.1
 
-**Given** a `Gate` component
+**Given** a `Gate` component in a `Serial` pipeline from Story 2.1
 **When** I provide a routing tensor/score
 **Then** it modulates the signal accordingly (e.g., soft gating or hard routing)
+**And** maintains the same educational error patterns established in Story 2.1
+
+**Given** gating within `Parallel` branches from Story 2.1
+**When** I create `Parallel([GateSkip(main=..., skip=...), TwoDVectorizer(...)])`
+**Then** gating works within each branch while preserving tuple output format for future concatenation
 
 ### Epic 3: Extensible Vectorization & Data
 **Goal:** Expand vectorization capabilities beyond basic text to include regex, custom logic, and efficiently handle large/variable datasets for real-world use cases.
@@ -359,7 +410,7 @@ So that I don't have to remember long HuggingFace ID strings or worry about typo
 **And** provides metadata like `dim=128` and `max_seq_len=512`
 
 **Given** a request for `Model.ROBERTA_BASE`
-**When** I instantiate a `TextVectorizer` with it
+**When** I instantiate a `TwoDVectorizer` or `ThreeDVectorizer` with it
 **Then** it loads correctly without me pasting the path
 
 ---
@@ -411,7 +462,7 @@ So that I can trust it in production or classroom environments.
 **Then** it strictly enforces `weights_only=True` to prevent pickle attacks
 
 **Given** a malicious pickle file
-**When** loaded via `TextVectorizer`
+**When** loaded via `TwoDVectorizer` or `ThreeDVectorizer`
 **Then** it raises `UnpicklingError` or safety violation (caught by safety filter)
 
 **Given** the test suite

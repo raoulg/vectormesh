@@ -51,8 +51,8 @@ development_status:
   epic-1-retrospective: optional
 
   # Epic 2: Advanced Composition & Architecture
-  epic-2: backlog
-  2-1-combinators-serial-parallel: backlog
+  epic-2: in-progress
+  2-1-combinators-serial-parallel: review
   2-2-syntactic-sugar-operator: backlog
   2-3-connectors-concat-stack: backlog
   2-4-component-visualization: backlog
