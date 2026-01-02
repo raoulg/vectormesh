@@ -1,0 +1,36 @@
+[project]
+name = "vectormesh"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "raoul grouls", email = "Raoul.Grouls@han.nl" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "beartype>=0.22.9",
+    "datasets>=4.4.2",
+    "fastmcp>=2.14.2",
+    "jaxtyping>=0.3.4",
+    "numpy>=2.4.0",
+    "pydantic>=2.12.5",
+    "sentence-transformers>=2.0.0",
+    "torch>=2.9.1",
+    "transformers>=4.57.3",
+]
+
+[project.scripts]
+vectormesh = "vectormesh:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-cov>=7.0.0",
+    "ruff>=0.14.10",
+    "ty>=0.0.8",
+    "vcrpy>=8.1.0",
+]
