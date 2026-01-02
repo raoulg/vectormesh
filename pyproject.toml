@@ -34,3 +34,43 @@ dev = [
     "ty>=0.0.8",
     "vcrpy>=8.1.0",
 ]
+
+[tool.pytest.ini_options]
+# Markers for organizing tests
+markers = [
+    "integration: marks tests as integration tests (slow, requires real models)",
+]
+
+# Default pytest options
+addopts = [
+    "-v",                           # Verbose output
+    "--strict-markers",             # Raise error on unknown markers
+    "--tb=short",                   # Shorter traceback format
+    "--cov=src/vectormesh",         # Coverage for source code
+    "--cov-report=term-missing",    # Show missing lines in terminal
+    "--cov-report=html",            # Generate HTML coverage report
+    "--cov-branch",                 # Include branch coverage
+]
+
+# Coverage settings
+[tool.coverage.run]
+source = ["src"]
+omit = [
+    "*/tests/*",
+    "*/__pycache__/*",
+    "*/.venv/*",
+]
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+]

@@ -3,6 +3,7 @@ from .types import OneDTensor, TwoDTensor, ThreeDTensor
 from .utils import check_shapes
 from .errors import VectorMeshError
 from .components.vectorizers import TextVectorizer
+from .data import VectorCache
 
 __all__ = [
     "VectorMeshComponent",
@@ -12,6 +13,7 @@ __all__ = [
     "check_shapes",
     "VectorMeshError",
     "TextVectorizer",
+    "VectorCache",
 ]
 
 def main() -> None:

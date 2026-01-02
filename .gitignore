@@ -1,2 +1,30 @@
+# Project data
 assets/**
+
+# Python
 **/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Testing
+.pytest_cache/
+htmlcov/
+.coverage
+.coverage.*
+*.cover
+
+# VectorMesh caches
+.vmcache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
