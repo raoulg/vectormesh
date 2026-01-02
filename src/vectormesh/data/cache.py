@@ -283,3 +283,41 @@ class VectorCache(VectorMeshComponent):
             )
 
         return self._metadata.copy()
+
+    def aggregate(self, strategy: str = "MeanAggregator") -> torch.Tensor:
+        """Aggregate embeddings using specified aggregation strategy.
+
+        Convenience method that loads an aggregator by name and applies it to
+        the cached embeddings. For custom aggregation logic, define a class
+        inheriting from BaseAggregator.
+
+        Args:
+            strategy: Aggregator class name (e.g., "MeanAggregator", "MaxAggregator")
+
+        Returns:
+            Aggregated tensor of shape (batch, dim)
+
+        Raises:
+            VectorMeshError: If aggregator not found
+
+        Shapes:
+            Input: get_embeddings() returns (batch, chunks, dim)
+            Output: (batch, dim)
+
+        Example:
+            ```python
+            cache = VectorCache.load(name="my_cache")
+
+            # Use built-in aggregator
+            mean_result = cache.aggregate(strategy="MeanAggregator")
+            max_result = cache.aggregate(strategy="MaxAggregator")
+
+            # Or use custom aggregator (must be defined and imported)
+            custom_result = cache.aggregate(strategy="MyCustomAggregator")
+            ```
+        """
+        from vectormesh.components.aggregation import get_aggregator
+
+        embeddings = self.get_embeddings()
+        aggregator = get_aggregator(strategy)
+        return aggregator(embeddings)

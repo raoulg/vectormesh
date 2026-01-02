@@ -45,7 +45,7 @@ development_status:
   1-1-core-types-component-base: done
   1-2-huggingface-textvectorizer: review
   1-3-vectorcache-persistence-storage: review
-  1-4-parameter-free-aggregation: backlog
+  1-4-parameter-free-aggregation: review
   1-5-mcp-server-basic: backlog
   epic-1-retrospective: optional
 

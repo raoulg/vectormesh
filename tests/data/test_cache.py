@@ -279,3 +279,70 @@ class TestVectorCache:
         # Test partial retrieval
         partial = loaded_cache.get_embeddings(indices=[0, 5, 9])
         assert partial.shape == (3, 384)
+
+    def test_vectorcache_aggregate_mean(self, tmp_path):
+        """Test VectorCache.aggregate() with MeanAggregator strategy."""
+        mock_vectorizer = Mock(spec=TextVectorizer)
+        # Return embeddings with 3D shape (batch=2, chunks=1, dim=4)
+        embeddings = torch.tensor([
+            [[1.0, 2.0, 3.0, 4.0]],
+            [[5.0, 6.0, 7.0, 8.0]]
+        ])
+        mock_vectorizer.return_value = embeddings
+        mock_vectorizer.model_name = "test-model"
+
+        cache = VectorCache.create(
+            texts=["text1", "text2"],
+            vectorizer=mock_vectorizer,
+            name="test_agg_mean",
+            cache_dir=tmp_path
+        )
+
+        # Test mean aggregation
+        result = cache.aggregate(strategy="MeanAggregator")
+        assert result.shape == (2, 4)
+        # With single chunk, mean should equal the original values
+        assert torch.allclose(result, torch.tensor([[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]]))
+
+    def test_vectorcache_aggregate_max(self, tmp_path):
+        """Test VectorCache.aggregate() with MaxAggregator strategy."""
+        mock_vectorizer = Mock(spec=TextVectorizer)
+        # Return embeddings with 3D shape (batch=2, chunks=1, dim=4)
+        embeddings = torch.tensor([
+            [[1.0, 2.0, 3.0, 4.0]],
+            [[5.0, 6.0, 7.0, 8.0]]
+        ])
+        mock_vectorizer.return_value = embeddings
+        mock_vectorizer.model_name = "test-model"
+
+        cache = VectorCache.create(
+            texts=["text1", "text2"],
+            vectorizer=mock_vectorizer,
+            name="test_agg_max",
+            cache_dir=tmp_path
+        )
+
+        # Test max aggregation
+        result = cache.aggregate(strategy="MaxAggregator")
+        assert result.shape == (2, 4)
+        # With single chunk, max should equal the original values
+        assert torch.allclose(result, torch.tensor([[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]]))
+
+    def test_vectorcache_aggregate_invalid_strategy(self, tmp_path):
+        """Test that invalid aggregation strategy raises error."""
+        mock_vectorizer = Mock(spec=TextVectorizer)
+        embeddings = torch.tensor([[[1.0, 2.0]]])
+        mock_vectorizer.return_value = embeddings
+        mock_vectorizer.model_name = "test-model"
+
+        cache = VectorCache.create(
+            texts=["text"],
+            vectorizer=mock_vectorizer,
+            name="test_invalid",
+            cache_dir=tmp_path
+        )
+
+        # Invalid strategy should raise VectorMeshError from get_aggregator
+        from vectormesh.errors import VectorMeshError
+        with pytest.raises(VectorMeshError):
+            cache.aggregate(strategy="InvalidAggregator")
