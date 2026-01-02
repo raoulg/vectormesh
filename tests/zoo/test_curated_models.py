@@ -3,19 +3,20 @@ import pytest
 from unittest.mock import patch
 
 from vectormesh.zoo.models import (
-    CuratedModel, MPNET, QWEN_0_6B, LABSE, MINILM,
+    ZooModel, MPNET, QWEN_0_6B, LABSE, MINILM,
     BGE_GEMMA2, E5_MISTRAL, QWEN_8B, DISTILUSE,
-    MVP_MODELS, GROWTH_MODELS, ALL_MODELS
+    ESSENTIAL_MODELS, EXTENDED_MODELS, ALL_MODELS,
+    MVP_MODELS, GROWTH_MODELS, Models  # Legacy and new enum
 )
 from vectormesh.utils.model_info import get_model_metadata
 
 
-class TestCuratedModel:
+class TestZooModel:
     """Test CuratedModel dataclass."""
 
-    def test_curated_model_immutable(self):
+    def test_zoo_model_immutable(self):
         """Test that CuratedModel is frozen/immutable."""
-        model = CuratedModel(
+        model = ZooModel(
             model_id="test",
             context_window=512,
             embedding_dim=768,
@@ -27,10 +28,10 @@ class TestCuratedModel:
         with pytest.raises(Exception):  # dataclass frozen error
             model.embedding_dim = 1024
 
-    def test_curated_model_validation(self):
+    def test_zoo_model_validation(self):
         """Test CuratedModel validates output_mode values."""
         # Valid output_mode
-        model = CuratedModel(
+        model = ZooModel(
             model_id="test",
             context_window=512,
             embedding_dim=768,
@@ -40,7 +41,7 @@ class TestCuratedModel:
         assert model.output_mode == "2d"
 
         # Valid 3d mode
-        model3d = CuratedModel(
+        model3d = ZooModel(
             model_id="test",
             context_window=512,
             embedding_dim=768,
@@ -53,9 +54,10 @@ class TestCuratedModel:
 class TestModelConstants:
     """Test individual model constants."""
 
-    def test_mvp_models_structure(self):
-        """Test MVP model constants have correct structure."""
-        assert len(MVP_MODELS) == 4
+    def test_essential_models_structure(self):
+        """Test Essential model constants have correct structure."""
+        assert len(ESSENTIAL_MODELS) == 4
+        assert len(MVP_MODELS) == 4  # Legacy alias should work
 
         # Test MPNET
         assert MPNET.model_id == "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
@@ -76,9 +78,10 @@ class TestModelConstants:
         assert MINILM.output_mode == "2d"
         assert MINILM.embedding_dim == 384
 
-    def test_growth_models_structure(self):
-        """Test Growth models have correct structure."""
-        assert len(GROWTH_MODELS) == 6
+    def test_extended_models_structure(self):
+        """Test Extended models have correct structure."""
+        assert len(EXTENDED_MODELS) == 6
+        assert len(GROWTH_MODELS) == 6  # Legacy alias should work
 
         # Test BGE Gemma2
         assert BGE_GEMMA2.output_mode == "3d"
@@ -88,15 +91,15 @@ class TestModelConstants:
     def test_all_models_collection(self):
         """Test ALL_MODELS includes all models."""
         assert len(ALL_MODELS) == 10
-        assert len(ALL_MODELS) == len(MVP_MODELS) + len(GROWTH_MODELS)
+        assert len(ALL_MODELS) == len(ESSENTIAL_MODELS) + len(EXTENDED_MODELS)
 
-        # Test that MVP models are in ALL_MODELS
-        for mvp_model in MVP_MODELS:
-            assert mvp_model in ALL_MODELS
+        # Test that Essential models are in ALL_MODELS
+        for essential_model in ESSENTIAL_MODELS:
+            assert essential_model in ALL_MODELS
 
-        # Test that Growth models are in ALL_MODELS
-        for growth_model in GROWTH_MODELS:
-            assert growth_model in ALL_MODELS
+        # Test that Extended models are in ALL_MODELS
+        for extended_model in EXTENDED_MODELS:
+            assert extended_model in ALL_MODELS
 
     def test_model_ids_unique(self):
         """Test that all model IDs are unique."""
@@ -152,3 +155,17 @@ class TestModelMetadataValidation:
 
         assert MPNET is not None
         assert len(ALL_MODELS) == 10
+
+    def test_models_enum_autocomplete(self):
+        """Test that Models enum provides autocomplete support."""
+        # Test enum structure
+        assert len(Models) == 10
+
+        # Test specific enum values
+        assert Models.MPNET.value == MPNET
+        assert Models.QWEN_0_6B.value == QWEN_0_6B
+
+        # Test accessing model metadata through enum
+        model = Models.MPNET.value
+        assert model.model_id == "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+        assert model.output_mode == "2d"

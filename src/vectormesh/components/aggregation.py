@@ -12,12 +12,12 @@ from abc import abstractmethod
 
 import torch
 from beartype import beartype
-from jaxtyping import Float, jaxtyped, TypeCheckError
+from jaxtyping import jaxtyped, TypeCheckError
 from pydantic import ConfigDict
-from torch import Tensor
 
 from vectormesh.base import VectorMeshComponent
 from vectormesh.errors import VectorMeshError
+from vectormesh.types import TwoDTensor, ThreeDTensor
 
 
 class BaseAggregator(VectorMeshComponent):
@@ -51,9 +51,7 @@ class BaseAggregator(VectorMeshComponent):
 
     model_config = ConfigDict(frozen=True)
 
-    def __call__(
-        self, embeddings: Float[Tensor, "batch chunks dim"]
-    ) -> Float[Tensor, "batch dim"]:
+    def __call__(self, embeddings: ThreeDTensor) -> TwoDTensor:
         """Apply aggregation with full type safety handled here.
 
         This method handles all the boilerplate: type checking, shape validation,
@@ -81,17 +79,12 @@ class BaseAggregator(VectorMeshComponent):
         return self._call_with_type_safety(embeddings)
 
     @jaxtyped(typechecker=beartype)
-    def _call_with_type_safety(
-        self, embeddings: Float[Tensor, "batch chunks dim"]
-    ) -> Float[Tensor, "batch dim"]:
+    def _call_with_type_safety(self, embeddings: ThreeDTensor) -> TwoDTensor:
         """Internal method with jaxtyped safety for beartype validation."""
         return self._aggregate(embeddings)
 
     @abstractmethod
-    def _aggregate(
-        self,
-        embeddings: Float[Tensor, "batch chunks dim"]  # FIXED: Was generic Tensor
-    ) -> Float[Tensor, "batch dim"]:
+    def _aggregate(self, embeddings: ThreeDTensor) -> TwoDTensor:
         """Core aggregation logic - override in subclasses.
 
         This is the only method you need to implement when extending BaseAggregator.
@@ -131,10 +124,7 @@ class MeanAggregator(BaseAggregator):
         ```
     """
 
-    def _aggregate(
-        self,
-        embeddings: Float[Tensor, "batch chunks dim"]  # FIXED: Was generic Tensor
-    ) -> Float[Tensor, "batch dim"]:
+    def _aggregate(self, embeddings: ThreeDTensor) -> TwoDTensor:
         """Average embeddings across chunks dimension."""
         return torch.mean(embeddings, dim=1)
 
@@ -160,10 +150,7 @@ class MaxAggregator(BaseAggregator):
         ```
     """
 
-    def _aggregate(
-        self,
-        embeddings: Float[Tensor, "batch chunks dim"]  # FIXED: Was generic Tensor
-    ) -> Float[Tensor, "batch dim"]:
+    def _aggregate(self, embeddings: ThreeDTensor) -> TwoDTensor:
         """Max pool embeddings across chunks dimension."""
         return torch.max(embeddings, dim=1).values
 

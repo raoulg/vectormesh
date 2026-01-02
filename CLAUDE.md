@@ -22,6 +22,7 @@ Always use Context7 MCP when I need library/API documentation, code generation, 
 - **always** use typehint, and run linters
 - **use Pydantic** for type validation and input/output contracts
 - Define clear schemas for model inputs/outputs
+- **TENSOR TYPES**: ALWAYS use the specific tensor types from `types.py` (TwoDTensor, ThreeDTensor, OneDTensor) instead of generic `Tensor` or jaxtyping `Float[Tensor, "..."]`. This ensures consistency across the codebase and better linting support.
 
 ### Path Handling
 - **Always use `pathlib`** - never use `os` for path operations
