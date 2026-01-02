@@ -8,6 +8,7 @@ from .components.aggregation import (
 )
 from .components.vectorizers import BaseVectorizer, TwoDVectorizer, ThreeDVectorizer
 from .components.combinators import Serial, Parallel
+from .components.connectors import GlobalConcat, GlobalStack
 from .data import VectorCache
 from .validation import validate_composition, validate_parallel, MorphismComposition, Morphism, TensorDimensionality
 from . import zoo
@@ -29,6 +30,8 @@ __all__ = [
     "ThreeDVectorizer",
     "Serial",
     "Parallel",
+    "GlobalConcat",
+    "GlobalStack",
     "VectorCache",
     "validate_composition",
     "validate_parallel",

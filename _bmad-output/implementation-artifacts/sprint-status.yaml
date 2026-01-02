@@ -54,7 +54,7 @@ development_status:
   epic-2: in-progress
   2-1-combinators-serial-parallel: done
   2-2-syntactic-sugar-operator: backlog
-  2-3-connectors-concat-stack: backlog
+  2-3-connectors-concat-stack: review
   2-4-component-visualization: backlog
   2-5-gating-mechanisms: backlog
   epic-2-retrospective: optional
