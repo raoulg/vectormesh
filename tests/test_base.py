@@ -1,6 +1,6 @@
 import pytest
 from pydantic import ValidationError
-from vectormesh.base import VectorMeshComponent
+from vectormesh.types import VectorMeshComponent
 
 class MyComponent(VectorMeshComponent):
     x: int

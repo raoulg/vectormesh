@@ -15,9 +15,7 @@ from beartype import beartype
 from jaxtyping import jaxtyped
 from pydantic import ConfigDict
 
-from vectormesh.base import VectorMeshComponent
-from vectormesh.errors import VectorMeshError
-from vectormesh.types import TwoDTensor, ThreeDTensor
+from vectormesh.types import VectorMeshComponent, VectorMeshError, TwoDTensor, ThreeDTensor
 
 
 class BaseAggregator(VectorMeshComponent):

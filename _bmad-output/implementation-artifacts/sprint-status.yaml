@@ -43,16 +43,16 @@ development_status:
   # Epic 1: Core Vector Integration & Tooling
   epic-1: in-progress
   1-1-core-types-component-base: done
-  1-2-huggingface-textvectorizer: review
-  1-3-vectorcache-persistence-storage: review
-  1-4-parameter-free-aggregation: review
-  1-5-model-introspection-2d-3d-support: review  # NEW: Architecture fix for 2D/3D support
+  1-2-huggingface-textvectorizer: done
+  1-3-vectorcache-persistence-storage: done
+  1-4-parameter-free-aggregation: done
+  1-5-model-introspection-2d-3d-support: done  # NEW: Architecture fix for 2D/3D support
   # NOTE: Old 1-5-mcp-server-basic moved to Epic 5 (requires docstrings generation)
   epic-1-retrospective: optional
 
   # Epic 2: Advanced Composition & Architecture
   epic-2: in-progress
-  2-1-combinators-serial-parallel: review
+  2-1-combinators-serial-parallel: done
   2-2-syntactic-sugar-operator: backlog
   2-3-connectors-concat-stack: backlog
   2-4-component-visualization: backlog

@@ -3,7 +3,7 @@ import pytest
 import torch
 
 from vectormesh.components.aggregation import MeanAggregator, MaxAggregator, BaseAggregator
-from vectormesh.errors import VectorMeshError
+from vectormesh.types import VectorMeshError
 
 
 class TestAggregatorTypeValidation:

@@ -9,7 +9,7 @@ from vectormesh.components.aggregation import (
     MaxAggregator,
     get_aggregator,
 )
-from vectormesh.errors import VectorMeshError
+from vectormesh.types import VectorMeshError
 
 
 class TestMeanAggregator:

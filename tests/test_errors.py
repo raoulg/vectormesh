@@ -1,5 +1,5 @@
 import pytest
-from vectormesh.errors import VectorMeshError
+from vectormesh.types import VectorMeshError
 
 def test_vectormesh_error_fields():
     # Verify friendlier error messages

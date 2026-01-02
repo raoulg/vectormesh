@@ -12,9 +12,8 @@ from beartype.typing import List
 from datasets import Dataset, load_from_disk
 from pydantic import ConfigDict, Field
 
-from vectormesh.base import VectorMeshComponent
+from vectormesh.types import VectorMeshComponent, VectorMeshError
 from vectormesh.components.vectorizers import BaseVectorizer
-from vectormesh.errors import VectorMeshError
 
 TVectorizer = TypeVar("TVectorizer", bound=BaseVectorizer)
 

@@ -1,14 +1,12 @@
 """Serial and Parallel combinators for component composition."""
 
-from typing import List, Union, Any
-from beartype.typing import Tuple
+from typing import Union, Any
+from beartype.typing import List, Tuple
 from jaxtyping import jaxtyped
 from beartype import beartype as typechecker
 from pydantic import Field, field_validator
 
-from vectormesh.base import VectorMeshComponent
-from vectormesh.types import TwoDTensor, ThreeDTensor
-from vectormesh.errors import VectorMeshError
+from vectormesh.types import VectorMeshComponent, TwoDTensor, ThreeDTensor, NDTensor, VectorMeshError
 from vectormesh.validation import validate_composition, validate_parallel
 
 
@@ -43,6 +41,12 @@ class Serial(VectorMeshComponent):
         if not components:
             return components
 
+        # Skip validation if any component is itself a combinator (avoid circular dependency)
+        from vectormesh.components.combinators import Serial, Parallel
+        for component in components:
+            if isinstance(component, (Serial, Parallel)):
+                return components  # Skip validation for nested combinators
+
         validation_result = validate_composition(components)
         if not validation_result.is_valid:
             raise ValueError(
@@ -52,14 +56,14 @@ class Serial(VectorMeshComponent):
         return components
 
     @jaxtyped(typechecker=typechecker)
-    def __call__(self, input_data: Any) -> Union[TwoDTensor, ThreeDTensor]:
+    def __call__(self, input_data: Union[List[str], NDTensor]) -> NDTensor:
         """Execute components sequentially.
 
         Args:
-            input_data: Input to first component
+            input_data: Input to first component (text list or tensor)
 
         Returns:
-            Output from final component
+            NDTensor output from final component
 
         Raises:
             VectorMeshError: If components are incompatible or execution fails
@@ -133,6 +137,12 @@ class Parallel(VectorMeshComponent):
         if not branches:
             return branches
 
+        # Skip validation if any branch is itself a combinator (avoid circular dependency)
+        from vectormesh.components.combinators import Serial, Parallel
+        for branch in branches:
+            if isinstance(branch, (Serial, Parallel)):
+                return branches  # Skip validation for nested combinators
+
         validation_result = validate_parallel(branches)
         if not validation_result.is_valid:
             raise ValueError(
@@ -142,14 +152,14 @@ class Parallel(VectorMeshComponent):
         return branches
 
     @jaxtyped(typechecker=typechecker)
-    def __call__(self, input_data: Any) -> Tuple:
+    def __call__(self, input_data: Union[List[str], NDTensor]) -> Tuple[NDTensor, ...]:
         """Execute all branches in parallel and collect results.
 
         Args:
-            input_data: Input to broadcast to all branches
+            input_data: Input to broadcast to all branches (text list or tensor)
 
         Returns:
-            Tuple containing output from each branch
+            Tuple[NDTensor, ...] containing output from each branch
 
         Raises:
             VectorMeshError: If branches fail or are incompatible

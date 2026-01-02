@@ -9,9 +9,7 @@ from pydantic import ConfigDict
 from sentence_transformers import SentenceTransformer
 from transformers import AutoTokenizer, AutoModel
 
-from vectormesh.base import VectorMeshComponent
-from vectormesh.errors import VectorMeshError
-from vectormesh.types import TwoDTensor, ThreeDTensor
+from vectormesh.types import VectorMeshComponent, VectorMeshError, TwoDTensor, ThreeDTensor, NDTensor
 from vectormesh.utils.model_info import get_model_metadata, ModelMetadata
 
 
@@ -28,7 +26,7 @@ class BaseVectorizer(VectorMeshComponent):
     _model: Any = None
     _tokenizer: Any = None
 
-    def __call__(self, texts: List[str]) -> torch.Tensor:
+    def __call__(self, texts: List[str]) -> NDTensor:
         """Vectorize texts. Must be implemented by subclasses."""
         raise NotImplementedError("Subclasses must implement __call__")
 

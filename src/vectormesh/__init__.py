@@ -1,7 +1,5 @@
-from .base import VectorMeshComponent
-from .types import OneDTensor, TwoDTensor, ThreeDTensor
+from .types import VectorMeshComponent, OneDTensor, TwoDTensor, ThreeDTensor, NDTensor, VectorMeshError
 from .utils import check_shapes
-from .errors import VectorMeshError
 from .components.aggregation import (
     BaseAggregator,
     MeanAggregator,
@@ -19,6 +17,7 @@ __all__ = [
     "OneDTensor",
     "TwoDTensor",
     "ThreeDTensor",
+    "NDTensor",
     "check_shapes",
     "VectorMeshError",
     "BaseAggregator",

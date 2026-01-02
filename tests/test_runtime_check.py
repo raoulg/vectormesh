@@ -16,6 +16,6 @@ def test_check_shapes_validation():
     # Incorrect shape: (batch, dim) -> (1, 10)
     # Should raise error
     # Note: We now wrap it, so it should be VectorMeshError
-    from vectormesh.errors import VectorMeshError
+    from vectormesh.types import VectorMeshError
     with pytest.raises(VectorMeshError):
         my_vector_func(torch.zeros(1, 10))

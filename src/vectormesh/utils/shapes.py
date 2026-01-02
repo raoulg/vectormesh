@@ -3,7 +3,7 @@ import functools
 from beartype import beartype
 from beartype.roar import BeartypeCallHintParamViolation
 from jaxtyping import TypeCheckError
-from ..errors import VectorMeshError
+from ..types import VectorMeshError
 
 def check_shapes(func):
     """

@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Literal, Optional
 from pydantic import BaseModel, ConfigDict
 from transformers import AutoConfig
-from ..errors import VectorMeshError
+from ..types import VectorMeshError
 
 
 class ModelMetadata(BaseModel):

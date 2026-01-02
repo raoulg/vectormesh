@@ -4,7 +4,7 @@ import torch
 from unittest.mock import Mock, patch
 
 from vectormesh.components.vectorizers import TwoDVectorizer, ThreeDVectorizer
-from vectormesh.errors import VectorMeshError
+from vectormesh.types import VectorMeshError
 
 
 class TestTwoDVectorizerCompatibility:

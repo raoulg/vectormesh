@@ -9,7 +9,7 @@ import torch
 
 from vectormesh.data.cache import VectorCache
 from vectormesh.components.vectorizers import BaseVectorizer, TwoDVectorizer, ThreeDVectorizer
-from vectormesh.errors import VectorMeshError
+from vectormesh.types import VectorMeshError
 
 
 def load_jsonl(file_path: Path, limit: int = None) -> list[str]:
@@ -358,7 +358,7 @@ class TestVectorCache:
         )
 
         # Invalid strategy should raise VectorMeshError from get_aggregator
-        from vectormesh.errors import VectorMeshError
+        from vectormesh.types import VectorMeshError
         with pytest.raises(VectorMeshError):
             cache.aggregate(strategy="InvalidAggregator")
 
@@ -376,7 +376,7 @@ class TestVectorCache:
             cache_dir=tmp_path
         )
 
-        from vectormesh.errors import VectorMeshError
+        from vectormesh.types import VectorMeshError
         with pytest.raises(VectorMeshError) as exc_info:
             cache.aggregate()
         

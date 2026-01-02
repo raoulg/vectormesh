@@ -1,7 +1,7 @@
 """Tests for model introspection module."""
 import pytest
 from vectormesh.utils.model_info import get_model_metadata, ModelMetadata
-from vectormesh.errors import VectorMeshError
+from vectormesh.types import VectorMeshError
 
 
 class TestGetModelMetadata:
