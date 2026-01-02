@@ -10,7 +10,7 @@ This example demonstrates how to:
 import json
 from pathlib import Path
 
-from vectormesh import TextVectorizer, VectorCache
+from vectormesh import TwoDVectorizer, VectorCache
 
 
 def load_jsonl_texts(file_path: Path, limit: int = None) -> list[str]:
@@ -45,7 +45,7 @@ def main():
 
     # 2. Create vectorizer
     print("\nInitializing vectorizer...")
-    vectorizer = TextVectorizer(
+    vectorizer = TwoDVectorizer(
         model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
 
