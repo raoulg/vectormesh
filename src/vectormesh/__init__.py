@@ -8,7 +8,7 @@ from .components.aggregation import (
     MaxAggregator,
     get_aggregator,
 )
-from .components.vectorizers import BaseVectorizer, TwoDVectorizer, ThreeDVectorizer, TextVectorizer
+from .components.vectorizers import BaseVectorizer, TwoDVectorizer, ThreeDVectorizer
 from .data import VectorCache
 from . import zoo
 
@@ -26,7 +26,6 @@ __all__ = [
     "BaseVectorizer",
     "TwoDVectorizer",
     "ThreeDVectorizer",
-    "TextVectorizer",
     "VectorCache",
     "zoo",
 ]

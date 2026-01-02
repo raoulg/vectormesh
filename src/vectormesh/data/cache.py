@@ -4,7 +4,7 @@ import json
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TypeVar, Generic, Union
 
 import numpy as np
 import torch
@@ -13,11 +13,12 @@ from datasets import Dataset, load_from_disk
 from pydantic import ConfigDict, Field
 
 from vectormesh.base import VectorMeshComponent
-from vectormesh.components.vectorizers import TextVectorizer
+from vectormesh.components.vectorizers import BaseVectorizer, TwoDVectorizer, ThreeDVectorizer
 from vectormesh.errors import VectorMeshError
 
+TVectorizer = TypeVar("TVectorizer", bound=BaseVectorizer)
 
-class VectorCache(VectorMeshComponent):
+class VectorCache(VectorMeshComponent, Generic[TVectorizer]):
     """Cache embeddings to disk using HuggingFace Datasets (Arrow/Parquet format).
 
     This component provides persistent storage for text embeddings with atomic
@@ -30,7 +31,7 @@ class VectorCache(VectorMeshComponent):
     Example:
         ```python
         # Create cache
-        vectorizer = TextVectorizer(model_name="sentence-transformers/all-MiniLM-L6-v2")
+        vectorizer = TwoDVectorizer(model_name="sentence-transformers/all-MiniLM-L6-v2")
         cache = VectorCache.create(
             texts=["hello", "world"],
             vectorizer=vectorizer,
@@ -60,11 +61,11 @@ class VectorCache(VectorMeshComponent):
     def create(
         cls,
         texts: List[str],
-        vectorizer: TextVectorizer,
+        vectorizer: TVectorizer,
         name: str,
         cache_dir: Path = Path(".vmcache"),
         batch_size: int = 32,
-    ) -> "VectorCache":
+    ) -> "VectorCache[TVectorizer]":
         """Create a new vector cache from texts.
 
         Args:
@@ -134,6 +135,7 @@ class VectorCache(VectorMeshComponent):
             metadata = {
                 "vectormesh_version": "0.1.0",
                 "model_name": vectorizer.model_name,
+                "output_mode": vectorizer.output_mode,  # Persist the mode (2d/3d)
                 "embedding_dim": int(embeddings_array.shape[1]),
                 "num_samples": len(texts),
                 "created_at": datetime.now().isoformat(),
@@ -284,6 +286,16 @@ class VectorCache(VectorMeshComponent):
 
         return self._metadata.copy()
 
+    @property
+    def output_mode(self) -> str:
+        """Get the output mode (2d or 3d) of the cached embeddings."""
+        if self._metadata is None:
+            # Should have been loaded by load() or create()
+            # But if accessed before load(), maybe error?
+            # It's safer to rely on get_metadata raising error.
+             return self.get_metadata().get("output_mode", "2d") # Default to 2d for backward compat
+        return self._metadata.get("output_mode", "2d")
+
     def aggregate(self, strategy: str = "MeanAggregator") -> torch.Tensor:
         """Aggregate embeddings using specified aggregation strategy.
 
@@ -317,6 +329,13 @@ class VectorCache(VectorMeshComponent):
             ```
         """
         from vectormesh.components.aggregation import get_aggregator
+
+        if self.output_mode == "2d":
+            raise VectorMeshError(
+                message="Cannot aggregate 2D embeddings",
+                hint="Aggregation is only for 3D (chunked) embeddings to reduce them to 2D",
+                fix="Use the embeddings directly via get_embeddings(), they are already pooled."
+            )
 
         embeddings = self.get_embeddings()
         aggregator = get_aggregator(strategy)

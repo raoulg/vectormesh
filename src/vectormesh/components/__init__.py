@@ -6,7 +6,7 @@ from .aggregation import (
     MaxAggregator,
     get_aggregator,
 )
-from .vectorizers import BaseVectorizer, TwoDVectorizer, ThreeDVectorizer, TextVectorizer
+from .vectorizers import BaseVectorizer, TwoDVectorizer, ThreeDVectorizer
 
 __all__ = [
     "BaseAggregator",
@@ -16,5 +16,4 @@ __all__ = [
     "BaseVectorizer",
     "TwoDVectorizer",
     "ThreeDVectorizer",
-    "TextVectorizer",
 ]

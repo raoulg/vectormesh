@@ -1,13 +1,11 @@
 """Text vectorization components using HuggingFace models."""
 
-from typing import Optional, Union, Literal, Any
-from pathlib import Path
-
+from typing import Optional, Literal, Any
 import torch
 from beartype.typing import List
 from jaxtyping import jaxtyped
 from beartype import beartype as typechecker
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict
 from sentence_transformers import SentenceTransformer
 from transformers import AutoTokenizer, AutoModel
 
@@ -27,30 +25,37 @@ class BaseVectorizer(VectorMeshComponent):
 
     # Internal state
     _metadata: Optional[ModelMetadata] = None
-    _model: Optional[Any] = None
-    _tokenizer: Optional[Any] = None
+    _model: Any = None
+    _tokenizer: Any = None
+
+    def __call__(self, texts: List[str]) -> torch.Tensor:
+        """Vectorize texts. Must be implemented by subclasses."""
+        raise NotImplementedError("Subclasses must implement __call__")
 
     def model_post_init(self, __context):
-        """Initialize model and introspect metadata."""
-        # Get model metadata via AutoConfig (fast, no full model download)
-        self._metadata = get_model_metadata(self.model_name)
-
-        # Cache the metadata for properties
-        object.__setattr__(self, "_metadata", self._metadata)
+        """Initialize model - NO autodetection here (optimistic loading)."""
+        pass
 
     @property
     def output_mode(self) -> Literal["2d", "3d"]:
         """Dimension of output tensors (2D for pooled, 3D for chunked)."""
+        # We only introspect if needed or if model is loaded
+        if self._metadata is None:
+             self._metadata = get_model_metadata(self.model_name)
         return self._metadata.output_mode
 
     @property
     def embedding_dim(self) -> int:
         """Dimension of embedding vectors."""
+        if self._metadata is None:
+             self._metadata = get_model_metadata(self.model_name)
         return self._metadata.hidden_size
 
     @property
     def context_window(self) -> int:
         """Maximum tokens per chunk."""
+        if self._metadata is None:
+             self._metadata = get_model_metadata(self.model_name)
         return self._metadata.max_position_embeddings
 
     def _detect_device(self) -> str:
@@ -66,11 +71,48 @@ class BaseVectorizer(VectorMeshComponent):
         else:
             return "cpu"
 
+    def _check_compatibility(self, required_mode: Literal["2d", "3d"]) -> None:
+        """Check if model compatibility matches required mode.
+
+        Args:
+            required_mode: The output mode required by the vectorizer ("2d" or "3d")
+
+        Raises:
+            VectorMeshError: If model compatibility does not match.
+        """
+        try:
+             metadata = get_model_metadata(self.model_name)
+             # Cache metadata while we have it
+             object.__setattr__(self, "_metadata", metadata)
+
+             if metadata.output_mode != required_mode:
+                 if required_mode == "2d":
+                     raise VectorMeshError(
+                         message=f"TwoDVectorizer requires a 2D model (sentence-transformer), but '{self.model_name}' is a 3D model.",
+                         hint="This model produces 3D output (chunks). Use `ThreeDVectorizer` instead.",
+                         fix=f"vectorizer = ThreeDVectorizer(model_name='{self.model_name}')"
+                     )
+                 else:
+                     raise VectorMeshError(
+                         message=f"ThreeDVectorizer requires a 3D model (raw transformer), but '{self.model_name}' is a 2D model.",
+                         hint="This model produces 2D output (pooled). Use `TwoDVectorizer` instead.",
+                         fix=f"vectorizer = TwoDVectorizer(model_name='{self.model_name}')"
+                     )
+
+        except VectorMeshError:
+            raise
+
+        except Exception:
+            # If we can't get metadata, we can't give a specific compatibility hint.
+            # We'll just let the original error bubble up or be handled by the caller.
+            pass
+
 
 class TwoDVectorizer(BaseVectorizer):
     """Sentence-transformer vectorizer producing 2D output (pooled embeddings).
 
-    Uses sentence-transformers library for models with built-in pooling.
+    Optimistically attempts to load the model. If loading fails, checks if the
+    model is actually a 3D model and provides a helpful error.
 
     Args:
         model_name: HuggingFace sentence-transformer model ID
@@ -87,17 +129,6 @@ class TwoDVectorizer(BaseVectorizer):
         Output: TwoDTensor [batch, dim] where batch=N texts, dim=embedding_dimension
     """
 
-    def model_post_init(self, __context):
-        """Initialize and validate 2D model."""
-        super().model_post_init(__context)
-
-        if self._metadata.output_mode != "2d":
-            raise VectorMeshError(
-                message=f"TwoDVectorizer requires 2D model, got {self._metadata.output_mode} for {self.model_name}",
-                hint="Use ThreeDVectorizer for raw transformers or TextVectorizer for automatic detection.",
-                fix=f"Try: TwoDVectorizer(model_name='sentence-transformers/all-MiniLM-L6-v2')"
-            )
-
     def _get_model(self) -> SentenceTransformer:
         """Lazy-load and cache the sentence transformer model."""
         if self._model is not None:
@@ -107,15 +138,31 @@ class TwoDVectorizer(BaseVectorizer):
         target_device = self.device if self.device is not None else self._detect_device()
 
         try:
-            # Load sentence-transformer model
+            # Check compatibility BEFORE loading (efficiency)
+            self._check_compatibility(required_mode="2d")
+
+            # Optimistic load
             model = SentenceTransformer(self.model_name, device=target_device)
-            # Cache the model (use object.__setattr__ to bypass frozen config)
+            # Cache the model
             object.__setattr__(self, "_model", model)
+            
+            # Enforce strict compatibility is done at start.
+            
             return model
 
+        except VectorMeshError:
+            raise
+
         except Exception as e:
+            # Check if it failed because verification was skipped (e.g. metadata fetch failed)?
+            # Or if it's a genuine loading error.
+            # We can try check again, or just handle error.
+            # safe to just handle error.
+
+            # If check passed (or failed to check), raise the original error
+            # wrapped in VectorMeshError
             raise VectorMeshError(
-                message=f"Failed to load 2D model '{self.model_name}': {str(e)}",
+                message=f"Failed to load user-specified 2D model '{self.model_name}': {str(e)}",
                 hint="Check that the model ID is correct and supports sentence-transformers.",
                 fix=f"Try: `huggingface-cli download {self.model_name}` to test manually."
             ) from e
@@ -161,7 +208,8 @@ class TwoDVectorizer(BaseVectorizer):
 class ThreeDVectorizer(BaseVectorizer):
     """Raw transformer vectorizer producing 3D output (chunked embeddings).
 
-    Uses raw transformers with manual chunking for models without built-in pooling.
+    Optimistically attempts to load the model. If loading fails, checks if the
+    model is actually a 2D model and provides a helpful error.
 
     Args:
         model_name: HuggingFace raw transformer model ID
@@ -183,21 +231,15 @@ class ThreeDVectorizer(BaseVectorizer):
     auto_chunk: bool = True
     chunk_size: Optional[int] = None
 
-    def model_post_init(self, __context):
-        """Initialize and validate 3D model."""
-        super().model_post_init(__context)
-
-        if self._metadata.output_mode != "3d":
-            raise VectorMeshError(
-                message=f"ThreeDVectorizer requires 3D model, got {self._metadata.output_mode} for {self.model_name}",
-                hint="Use TwoDVectorizer for sentence-transformers or TextVectorizer for automatic detection.",
-                fix=f"Try: ThreeDVectorizer(model_name='bert-base-uncased')"
-            )
-
     @property
     def context_window(self) -> int:
         """Maximum tokens per chunk."""
-        return self.chunk_size or self._metadata.max_position_embeddings
+        # Use cached metadata if available, otherwise fetch it
+        if self.chunk_size:
+            return self.chunk_size
+        if self._metadata is None:
+             self._metadata = get_model_metadata(self.model_name)
+        return self._metadata.max_position_embeddings
 
     def _get_model_and_tokenizer(self):
         """Lazy-load and cache the model and tokenizer."""
@@ -208,18 +250,28 @@ class ThreeDVectorizer(BaseVectorizer):
         target_device = self.device if self.device is not None else self._detect_device()
 
         try:
-            # Raw transformer (requires manual pooling/chunking)
+            # Check compatibility BEFORE loading (efficiency)
+            self._check_compatibility(required_mode="3d")
+
+            # Optimistic load
             tokenizer = AutoTokenizer.from_pretrained(self.model_name)
             model = AutoModel.from_pretrained(self.model_name)
             model = model.to(target_device)
 
-            # Cache both (use object.__setattr__ to bypass frozen config)
+            # Cache both
             object.__setattr__(self, "_model", model)
             object.__setattr__(self, "_tokenizer", tokenizer)
 
+            # Enforce strict compatibility is done at start.
+            
             return model, tokenizer
 
+        except VectorMeshError:
+            raise
+
         except Exception as e:
+            # Check compatibility is done at start.
+            
             raise VectorMeshError(
                 message=f"Failed to load 3D model '{self.model_name}': {str(e)}",
                 hint="Check that the model ID is correct and you have internet connectivity.",
@@ -304,80 +356,3 @@ class ThreeDVectorizer(BaseVectorizer):
             chunk = tokens[i:i + chunk_size]
             chunks.append(chunk)
         return chunks
-
-
-class TextVectorizer(BaseVectorizer):
-    """Automatic text vectorizer that routes to TwoDVectorizer or ThreeDVectorizer.
-
-    Automatically detects whether a model produces 2D (sentence-transformers)
-    or 3D (raw transformers) output and delegates to the appropriate vectorizer.
-
-    Args:
-        model_name: HuggingFace model identifier
-        auto_chunk: Whether to chunk texts longer than context window (3D only)
-        chunk_size: Maximum tokens per chunk (3D only, overrides model's max_position_embeddings)
-        device: Target device ('cuda', 'mps', 'cpu', or None for auto-detection)
-
-    Example:
-        ```python
-        # Automatically routes to TwoDVectorizer
-        vectorizer = TextVectorizer(model_name="sentence-transformers/all-MiniLM-L6-v2")
-        embeddings = vectorizer(["Hello world"])  # Returns: TwoDTensor [1, 384]
-
-        # Automatically routes to ThreeDVectorizer
-        vectorizer = TextVectorizer(model_name="bert-base-uncased")
-        chunks = vectorizer(["Long document..."])  # Returns: ThreeDTensor [1, chunks, 768]
-        ```
-
-    Shapes:
-        2D output: TwoDTensor [batch, dim]
-        3D output: ThreeDTensor [batch, chunks, dim]
-    """
-
-    auto_chunk: bool = True
-    chunk_size: Optional[int] = None
-
-    # Internal vectorizers
-    _twod_vectorizer: Optional[TwoDVectorizer] = None
-    _threed_vectorizer: Optional[ThreeDVectorizer] = None
-
-    @property
-    def context_window(self) -> int:
-        """Maximum tokens per chunk."""
-        return self.chunk_size or self._metadata.max_position_embeddings
-
-    def _get_vectorizer(self) -> Union[TwoDVectorizer, ThreeDVectorizer]:
-        """Get the appropriate vectorizer based on model type."""
-        if self._metadata.output_mode == "2d":
-            if self._twod_vectorizer is None:
-                vectorizer = TwoDVectorizer(model_name=self.model_name, device=self.device)
-                object.__setattr__(self, "_twod_vectorizer", vectorizer)
-            return self._twod_vectorizer
-        else:
-            if self._threed_vectorizer is None:
-                vectorizer = ThreeDVectorizer(
-                    model_name=self.model_name,
-                    auto_chunk=self.auto_chunk,
-                    chunk_size=self.chunk_size,
-                    device=self.device
-                )
-                object.__setattr__(self, "_threed_vectorizer", vectorizer)
-            return self._threed_vectorizer
-
-    @jaxtyped(typechecker=typechecker)
-    def __call__(self, texts: List[str]) -> Union[TwoDTensor, ThreeDTensor]:
-        """Vectorize texts with automatic dimension detection.
-
-        Args:
-            texts: List of text strings to vectorize
-
-        Returns:
-            TwoDTensor[batch, dim] if output_mode=="2d"
-            ThreeDTensor[batch, chunks, dim] if output_mode=="3d"
-
-        Shapes:
-            2D output: [B, D] where B=batch_size, D=embedding_dim
-            3D output: [B, C, D] where C=max_chunks across batch
-        """
-        vectorizer = self._get_vectorizer()
-        return vectorizer(texts)

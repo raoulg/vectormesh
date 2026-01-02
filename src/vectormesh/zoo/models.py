@@ -33,7 +33,7 @@ class ZooModel:
 # MVP Models (4)
 MPNET = ZooModel(
     model_id="sentence-transformers/paraphrase-multilingual-mpnet-base-v2",
-    context_window=512,
+    context_window=514,
     embedding_dim=768,
     output_mode="2d",
     description="Dutch support, 249M downloads, best general performance"
@@ -130,7 +130,7 @@ class Models(Enum):
 
         # IDE autocomplete works!
         model = Models.MPNET.value
-        vectorizer = TextVectorizer(model_name=model.model_id)
+        vectorizer = TwoDVectorizer(model_name=model.model_id)
     """
 
     # MVP Models
