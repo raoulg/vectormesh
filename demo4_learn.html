@@ -1,0 +1,295 @@
+<html>
+    <head>
+        <meta charset="utf-8">
+        
+            <script src="lib/bindings/utils.js"></script>
+            <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/dist/vis-network.min.css" integrity="sha512-WgxfT5LWjfszlPHXRmBWHkV2eceiWTOBvrKCNbdgDYTHrT2AeLCGbF4sZlZw3UMN3WtL0tGUoIAKsu8mllg/XA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+            <script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/vis-network.min.js" integrity="sha512-LnvoEWDFrqGHlHmDD2101OrLcbsfkrzoSpvtSQtxK3RMnRV0eOkhhBN2dXHKRrUU8p2DGRTk35n4O8nWSVe1mQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+            
+        
+<center>
+<h1></h1>
+</center>
+
+<!-- <link rel="stylesheet" href="../node_modules/vis/dist/vis.min.css" type="text/css" />
+<script type="text/javascript" src="../node_modules/vis/dist/vis.js"> </script>-->
+        <link
+          href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0-beta3/dist/css/bootstrap.min.css"
+          rel="stylesheet"
+          integrity="sha384-eOJMYsd53ii+scO/bJGFsiCZc+5NDVN2yr8+0RDqr0Ql0h+rP48ckxlpbzKgwra6"
+          crossorigin="anonymous"
+        />
+        <script
+          src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0-beta3/dist/js/bootstrap.bundle.min.js"
+          integrity="sha384-JEW9xMcG8R+pH31jmWH6WWP0WintQrMb4s7ZOdauHnUtxwoG2vI5DkLtS3qm9Ekf"
+          crossorigin="anonymous"
+        ></script>
+
+
+        <center>
+          <h1></h1>
+        </center>
+        <style type="text/css">
+
+             #mynetwork {
+                 width: 100%;
+                 height: 800px;
+                 background-color: #F8F9FA;
+                 border: 1px solid lightgray;
+                 position: relative;
+                 float: left;
+             }
+
+             
+
+             
+
+             
+        </style>
+    
+<!-- MathJax for LaTeX rendering -->
+<script>
+window.MathJax = {
+  tex: {
+    inlineMath: [['$', '$'], ['\\(', '\\)']],
+    displayMath: [['$$', '$$'], ['\\[', '\\]']]
+  },
+  startup: {
+    pageReady: () => {
+      return MathJax.startup.defaultPageReady().then(() => {
+        // Initial typeset only
+        MathJax.typesetPromise();
+      });
+    }
+  }
+};
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+<!-- Hide default vis.js tooltips (we use custom HTML tooltips) -->
+<style>
+.vis-tooltip {
+  display: none !important;
+}
+
+.vis-network canvas {
+  outline: none;
+}
+
+#custom-tooltip {
+  line-height: 1.5;
+}
+
+#custom-tooltip b {
+  color: #2C3E50;
+}
+
+#custom-tooltip pre {
+  background: #f5f5f5;
+  padding: 5px;
+  border-radius: 3px;
+  margin: 5px 0;
+  overflow-x: auto;
+}
+</style>
+
+<!-- Custom tooltip system (vis.js doesn't support HTML tooltips natively) -->
+<script>
+let customTooltip = null;
+let tooltipTimeout = null;
+
+// Create custom tooltip element
+function createCustomTooltip() {
+  const tooltip = document.createElement('div');
+  tooltip.id = 'custom-tooltip';
+  tooltip.style.cssText = `
+    position: absolute;
+    background: white;
+    border: 2px solid #34495E;
+    border-radius: 5px;
+    padding: 10px;
+    font-family: sans-serif;
+    font-size: 14px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    max-width: 400px;
+    z-index: 10000;
+    pointer-events: none;
+    display: none;
+  `;
+  document.body.appendChild(tooltip);
+  return tooltip;
+}
+
+// Show custom tooltip
+function showCustomTooltip(x, y, htmlContent) {
+  if (!customTooltip) {
+    customTooltip = createCustomTooltip();
+  }
+
+  // Clear any pending hide
+  if (tooltipTimeout) {
+    clearTimeout(tooltipTimeout);
+    tooltipTimeout = null;
+  }
+
+  // Set HTML content
+  customTooltip.innerHTML = htmlContent;
+
+  // Position tooltip
+  customTooltip.style.left = (x + 10) + 'px';
+  customTooltip.style.top = (y + 10) + 'px';
+  customTooltip.style.display = 'block';
+
+  // Typeset with MathJax
+  if (window.MathJax && window.MathJax.typesetPromise) {
+    window.MathJax.typesetPromise([customTooltip]).catch(err => {});
+  }
+}
+
+// Hide custom tooltip
+function hideCustomTooltip() {
+  tooltipTimeout = setTimeout(() => {
+    if (customTooltip) {
+      customTooltip.style.display = 'none';
+    }
+  }, 100);
+}
+
+// Wait for vis.js network to be ready
+window.addEventListener('load', function() {
+  setTimeout(function() {
+    // Access the global network variable created by PyVis
+    if (typeof network === 'undefined') {
+      console.error('Network not found');
+      return;
+    }
+
+    // Handle hover on nodes
+    network.on('hoverNode', function(params) {
+      const nodeId = params.node;
+      const nodeData = network.body.data.nodes.get(nodeId);
+
+      if (nodeData && nodeData.title) {
+        const pointer = params.pointer.DOM;
+        showCustomTooltip(pointer.x, pointer.y, nodeData.title);
+      }
+    });
+
+    // Handle hover on edges
+    network.on('hoverEdge', function(params) {
+      const edgeId = params.edge;
+      const edgeData = network.body.data.edges.get(edgeId);
+
+      if (edgeData && edgeData.title) {
+        const pointer = params.pointer.DOM;
+        showCustomTooltip(pointer.x, pointer.y, edgeData.title);
+      }
+    });
+
+    // Handle blur (mouse leaves)
+    network.on('blurNode', hideCustomTooltip);
+    network.on('blurEdge', hideCustomTooltip);
+
+    // Also hide on canvas click
+    network.on('click', hideCustomTooltip);
+
+  }, 500);
+});
+</script>
+</head>
+
+
+    <body>
+        <div class="card" style="width: 100%">
+            
+            
+            <div id="mynetwork" class="card-body"></div>
+        </div>
+
+        
+        
+
+        <script type="text/javascript">
+
+              // initialize global variables.
+              var edges;
+              var nodes;
+              var allNodes;
+              var allEdges;
+              var nodeColors;
+              var originalNodes;
+              var network;
+              var container;
+              var options, data;
+              var filter = {
+                  item : '',
+                  property : '',
+                  value : []
+              };
+
+              
+
+              
+
+              // This method is responsible for drawing the graph, returns the drawn network
+              function drawGraph() {
+                  var container = document.getElementById('mynetwork');
+
+                  
+
+                  // parsing and collecting nodes and edges from the python
+                  nodes = new vis.DataSet([{"borderWidth": 2, "borderWidthSelected": 4, "color": "#FF6B6B", "font": {"face": "Arial, sans-serif", "size": 16}, "id": "domain_0", "label": "\u03a3*", "shape": "dot", "title": "\u003cb\u003eDomain:\u003c/b\u003e \u03a3*\u003cbr\u003e\u003cbr\u003e\u003ci\u003eObject in VectorMesh category\u003c/i\u003e", "x": 0, "y": 0}, {"borderWidth": 2, "borderWidthSelected": 4, "color": "#4ECDC4", "font": {"face": "Arial, sans-serif", "size": 16}, "id": "domain_1", "label": "\u211d\u1d2e\u02e3\u2077\u2076\u2078", "shape": "dot", "title": "\u003cb\u003eDomain:\u003c/b\u003e \u211d\u1d2e\u02e3\u2077\u2076\u2078\u003cbr\u003e\u003cbr\u003e\u003ci\u003eObject in VectorMesh category\u003c/i\u003e", "x": 300, "y": 0}, {"borderWidth": 2, "borderWidthSelected": 4, "color": "#4ECDC4", "font": {"face": "Arial, sans-serif", "size": 16}, "id": "domain_2", "label": "\u211d\u1d2e\u02e3\u00b2\u2075\u2076", "shape": "dot", "title": "\u003cb\u003eDomain:\u003c/b\u003e \u211d\u1d2e\u02e3\u00b2\u2075\u2076\u003cbr\u003e\u003cbr\u003e\u003ci\u003eObject in VectorMesh category\u003c/i\u003e", "x": 600, "y": 0}]);
+                  edges = new vis.DataSet([{"arrows": "to", "color": "#2C3E50", "font": {"align": "middle", "size": 14}, "from": "domain_0", "label": "f", "title": "\u003cb\u003eMorphism:\u003c/b\u003e f\u003cbr\u003e\u003cb\u003eSignature:\u003c/b\u003e $f: \\Sigma^* \\to \\mathbb{R}^{{B \\times 768}}$\u003cbr\u003e\u003cbr\u003e\u003cb\u003eImplementation:\u003c/b\u003e MockVectorizer\u003cbr\u003e\u003cb\u003eParameters:\u003c/b\u003e\u003cbr\u003e  \u2022 model_name: bert-base-uncased\u003cbr\u003e  \u2022 embedding_dim: 768\u003cbr\u003e", "to": "domain_1", "width": 2}, {"arrows": "to", "color": "#2C3E50", "font": {"align": "middle", "size": 14}, "from": "domain_1", "label": "g", "title": "\u003cb\u003eMorphism:\u003c/b\u003e g\u003cbr\u003e\u003cb\u003eSignature:\u003c/b\u003e $g: \\Sigma^* \\to \\mathbb{R}^{{B \\times 256}}$\u003cbr\u003e\u003cbr\u003e\u003cb\u003eImplementation:\u003c/b\u003e MockProcessor\u003cbr\u003e\u003cb\u003eParameters:\u003c/b\u003e\u003cbr\u003e  \u2022 output_dim: 256\u003cbr\u003e", "to": "domain_2", "width": 2}]);
+
+                  nodeColors = {};
+                  allNodes = nodes.get({ returnType: "Object" });
+                  for (nodeId in allNodes) {
+                    nodeColors[nodeId] = allNodes[nodeId].color;
+                  }
+                  allEdges = edges.get({ returnType: "Object" });
+                  // adding nodes and edges to the graph
+                  data = {nodes: nodes, edges: edges};
+
+                  var options = {"physics": {"enabled": false}, "edges": {"smooth": {"type": "curvedCW", "roundness": 0.2}, "arrows": {"to": {"enabled": true, "scaleFactor": 1.2}}}, "nodes": {"shape": "box", "margin": 10, "font": {"multi": "html"}, "widthConstraint": {"minimum": 100, "maximum": 200}}, "interaction": {"hover": true, "tooltipDelay": 0, "hideEdgesOnDrag": false, "hideEdgesOnZoom": false}};
+
+                  
+
+
+                  
+
+                  network = new vis.Network(container, data, options);
+
+                  
+
+                  
+
+                  
+
+
+                  
+
+                  return network;
+
+              }
+              drawGraph();
+        </script>
+    
+<div style="position: fixed; top: 10px; right: 10px; background: white;
+            border: 2px solid #34495E; border-radius: 8px; padding: 15px;
+            max-width: 250px; font-family: sans-serif; font-size: 13px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+  <h3 style="margin-top: 0; color: #2C3E50;">VectorMesh</h3>
+
+  <div style="margin: 10px 0;">
+    <b>Color Code:</b><br>
+    <span style="color: #FF6B6B;">● Σ* (Text)</span><br>
+    <span style="color: #4ECDC4;">● ℝ^2D (2D Tensors)</span><br>
+    <span style="color: #95E1D3;">● ℝ^3D (3D Tensors)</span>
+  </div>
+
+  <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #ccc; font-size: 11px; color: #666;">
+    <i>Hover over arrows for details</i>
+  </div>
+</div>
+</body>
+</html>

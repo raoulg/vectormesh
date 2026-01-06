@@ -268,57 +268,87 @@ So that I can merge parallel branches into a single tensor for downstream proces
 
 ---
 
-### Story 2.4: Component Visualization
+### Story 2.4: Gating Mechanisms (Basic)
+As an advanced user,
+I want basic gating components (`Skip` and `Gate`),
+So that I can add residual connections and signal modulation without complex magic.
+
+**Integration Note:** Depends on Story 2.1 combinator framework. Components inherit from `VectorMeshComponent` with frozen Pydantic pattern. No auto-magic features - explicit, educational design.
+
+**Acceptance Criteria:**
+
+**Given** a main component path
+**When** I use `Skip(main=MyLayer())`
+**Then** it computes `LayerNorm(input + main(input))` with add+norm pattern
+**And** validates shapes match (or uses manual projection if provided)
+**And** raises educational errors on mismatches
+
+**Given** a component to gate with a router function
+**When** I use `Gate(component=MyLayer(), router=my_router_fn)`
+**Then** it computes `router(input) * component(input)`
+**And** router is always required (no default pass-through)
+**And** integrates seamlessly with Serial/Parallel from Story 2.1
+
+**Given** Skip or Gate in combinators
+**When** I compose complex pipelines
+**Then** they maintain proper 2D/3D tensor type tracking
+**And** follow VectorMeshComponent pattern (frozen=True)
+
+---
+
+### Story 2.5: Complex Gating & MoE
+As an advanced user,
+I want complex gating mechanisms (Highway networks, MoE, learnable gates),
+So that I can build sophisticated routing and mixture-of-experts architectures.
+
+**Integration Note:** Builds on Story 2.4 basic gating. Adds learnable components, sparse routing, and advanced patterns from research literature.
+
+**Acceptance Criteria:**
+
+**Given** a transform component
+**When** I use `Highway(transform=MyLayer(), gate_fn=learned_gate)`
+**Then** it computes `G * transform(input) + (1-G) * input` with learned gating
+**And** implements Highway network pattern from literature
+
+**Given** multiple expert components
+**When** I use `MoE(experts=[E1(), E2(), E3()], router=my_router, top_k=2)`
+**Then** it routes to top-k experts based on learned routing
+**And** combines outputs with routing weights
+**And** supports load balancing
+
+**Given** a component with learnable gate
+**When** I use `LearnableGate(component=MyLayer(), gate_network=GateNet())`
+**Then** gradients flow through both component and gate network
+**And** integrates with PyTorch autograd
+
+---
+
+### Story 2.6: Component Visualization
 As a user,
 I want to visualize my component graph,
 So that I can verify the topology and tensor shapes.
 
-**Integration Note:** Depends on Story 2.1 `Serial` and `Parallel` combinator implementations. Must visualize nested combinator structures and 2D/3D tensor flows defined in Story 2.1.
+**Integration Note:** Depends on Story 2.1 `Serial` and `Parallel` combinators, Story 2.4 basic gating (Skip/Gate), and Story 2.5 complex gating (Highway/MoE). Must visualize nested structures and 2D/3D tensor flows with mathematical notation.
 
 **Acceptance Criteria:**
 
 **Given** a `Serial` pipeline from Story 2.1
 **When** I call `visualize(pipeline)`
-**Then** it prints a clear ASCII representation showing: `TwoDVectorizer -> MeanProcessor -> [TwoDTensor(B,768) -> TwoDTensor(B,128)]`
+**Then** it prints a clear representation with mathematical notation showing: `TwoDVectorizer → MeanProcessor → ℝ^{B×768} → ℝ^{B×128}`
 
 **Given** a `Parallel` structure from Story 2.1
 **When** I call `visualize(parallel_pipeline)`
-**Then** it shows branching topology:
+**Then** it shows branching topology with mathematical symbols:
 ```
-Input[texts]
-├── TwoDVectorizer("model1") -> TwoDTensor(B,384)
-└── TwoDVectorizer("model2") -> TwoDTensor(B,768)
-Output: tuple[TwoDTensor, TwoDTensor]
+Input: Σ*
+├── TwoDVectorizer("model1") → ℝ^{B×384}
+└── TwoDVectorizer("model2") → ℝ^{B×768}
+Output: (ℝ^{B×384}, ℝ^{B×768})
 ```
 
-**Given** nested combinators from Story 2.1 AC4c
+**Given** nested combinators from Story 2.1 AC4c with gating from Stories 2.4 and 2.5
 **When** I visualize the complex multi-level structure
-**Then** it shows the complete hierarchy with proper 2D/3D dimension flow tracking
-
----
-
-### Story 2.5: Gating Mechanisms
-As an advanced user,
-I want gating components (`Gate`, `GateSkip`),
-So that I can dynamically route data or apply residual connections based on vector content.
-
-**Integration Note:** Depends on Story 2.1 combinator framework. Gating components must inherit from `VectorMeshComponent` and integrate seamlessly with `Serial`/`Parallel` containers while respecting 2D/3D tensor flows.
-
-**Acceptance Criteria:**
-
-**Given** a "Main" path and a "Skip" path from Story 2.1 combinators
-**When** I use `GateSkip(main=Serial([...]), skip=TwoDVectorizer(...))`
-**Then** the outputs are combined (typically summed) with proper 2D/3D shape validation
-**And** it integrates with the combinator framework from Story 2.1
-
-**Given** a `Gate` component in a `Serial` pipeline from Story 2.1
-**When** I provide a routing tensor/score
-**Then** it modulates the signal accordingly (e.g., soft gating or hard routing)
-**And** maintains the same educational error patterns established in Story 2.1
-
-**Given** gating within `Parallel` branches from Story 2.1
-**When** I create `Parallel([GateSkip(main=..., skip=...), TwoDVectorizer(...)])`
-**Then** gating works within each branch while preserving tuple output format for future concatenation
+**Then** it shows the complete hierarchy including skip connections, gates, Highway networks, and MoE with proper 2D/3D dimension flow tracking
 
 ### Epic 3: Extensible Vectorization & Data
 **Goal:** Expand vectorization capabilities beyond basic text to include regex, custom logic, and efficiently handle large/variable datasets for real-world use cases.

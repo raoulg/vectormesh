@@ -9,6 +9,7 @@ from .aggregation import (
 from .vectorizers import BaseVectorizer, TwoDVectorizer, ThreeDVectorizer
 from .combinators import Serial, Parallel
 from .connectors import GlobalConcat, GlobalStack
+from .gating import Skip, Gate
 
 __all__ = [
     "BaseAggregator",
@@ -22,4 +23,6 @@ __all__ = [
     "Parallel",
     "GlobalConcat",
     "GlobalStack",
+    "Skip",
+    "Gate",
 ]

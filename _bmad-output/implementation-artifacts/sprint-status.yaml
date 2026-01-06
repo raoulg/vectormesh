@@ -55,8 +55,9 @@ development_status:
   2-1-combinators-serial-parallel: done
   2-2-syntactic-sugar-operator: backlog
   2-3-connectors-concat-stack: review
-  2-4-component-visualization: backlog
-  2-5-gating-mechanisms: backlog
+  2-4-gating-mechanisms: review  # Basic Skip & Gate (no magic)
+  2-5-complex-gating: backlog  # MoE, Highway, learnable gates
+  2-6-component-visualization: done  # Mathematical notation visualization
   epic-2-retrospective: optional
 
   # Epic 3: Extensible Vectorization & Data
