@@ -15,7 +15,6 @@ COLOR_SCHEME = {
     "text_domain": "#FF6B6B",      # Σ* - Warm coral
     "tensor_2d": "#4ECDC4",        # ℝ^2D - Teal
     "tensor_3d": "#95E1D3",        # ℝ^3D - Mint green
-    "tensor_4d": "#A78BFA",        # ℝ^4D - Soft purple
     "morphism_arrow": "#2C3E50",   # Arrows - Dark slate
     "hover_highlight": "#FFD93D",  # On hover - Gold
     "cached_component": "#6BCF7F", # Cached - Fresh green
@@ -174,7 +173,7 @@ class InteractiveRenderer:
         """Get node color based on domain type metadata.
 
         Args:
-            domain_type: One of "text", "2d", "3d", "4d"
+            domain_type: One of "text", "2d", "3d"
 
         Returns:
             Hex color code
@@ -183,7 +182,6 @@ class InteractiveRenderer:
             "text": self.colors["text_domain"],
             "2d": self.colors["tensor_2d"],
             "3d": self.colors["tensor_3d"],
-            "4d": self.colors["tensor_4d"],
         }
         return color_map.get(domain_type, self.colors["tensor_2d"])
 
