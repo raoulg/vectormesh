@@ -10,10 +10,6 @@ from jaxtyping import Float
 from pydantic import BaseModel, ConfigDict
 
 
-# =============================================================================
-# TENSOR TYPES - Individual dimensions
-# =============================================================================
-
 OneDTensor = Float[Tensor, "dim"]
 OneDTensor.__doc__ = "1D Tensor representing a single vector. Shape: (dim,)"
 
@@ -27,9 +23,6 @@ FourDTensor = Float[Tensor, "batch chunks tokens embed"]
 FourDTensor.__doc__ = "4D Tensor representing a batch of chunked token embeddings. Shape: (batch, chunks, tokens, embed)"
 
 
-# =============================================================================
-# CENTRALIZED TENSOR UNION TYPE - Main type for extensibility
-# =============================================================================
 
 NDTensor = Union[TwoDTensor, ThreeDTensor]
 NDTensor.__doc__ = """
@@ -44,9 +37,6 @@ Usage:
 """
 
 
-# =============================================================================
-# BASE CLASSES
-# =============================================================================
 
 class VectorMeshComponent(BaseModel):
     """
@@ -57,10 +47,6 @@ class VectorMeshComponent(BaseModel):
     """
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
-
-# =============================================================================
-# EXCEPTIONS
-# =============================================================================
 
 class VectorMeshError(Exception):
     """
