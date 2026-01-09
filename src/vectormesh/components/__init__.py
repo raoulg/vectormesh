@@ -7,9 +7,10 @@ from .aggregation import (
     get_aggregator,
 )
 from .vectorizers import BaseVectorizer, TwoDVectorizer, ThreeDVectorizer
+from .regex import RegexVectorizer
 from .combinators import Serial, Parallel
 from .connectors import GlobalConcat, GlobalStack
-from .gating import Skip, Gate
+from .gating import Skip, Gate, Highway, Switch, LearnableGate, MoE
 
 __all__ = [
     "BaseAggregator",
@@ -19,10 +20,15 @@ __all__ = [
     "BaseVectorizer",
     "TwoDVectorizer",
     "ThreeDVectorizer",
+    "RegexVectorizer",
     "Serial",
     "Parallel",
     "GlobalConcat",
     "GlobalStack",
     "Skip",
     "Gate",
+    "Highway",
+    "Switch",
+    "LearnableGate",
+    "MoE",
 ]

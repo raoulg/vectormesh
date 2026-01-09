@@ -29,6 +29,7 @@ __all__ = [
     "BaseVectorizer",
     "TwoDVectorizer",
     "ThreeDVectorizer",
+    "RegexVectorizer",
     "Serial",
     "Parallel",
     "GlobalConcat",
