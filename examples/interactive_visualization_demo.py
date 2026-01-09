@@ -51,8 +51,8 @@ register_morphism(
         source=TensorDimensionality.TEXT,
         target=TensorDimensionality.TWO_D,
         component_name="MockVectorizer",
-        description="Mock vectorizer (TEXT→2D)"
-    )
+        description="Mock vectorizer (TEXT→2D)",
+    ),
 )
 
 register_morphism(
@@ -61,8 +61,8 @@ register_morphism(
         source=TensorDimensionality.TWO_D,
         target=TensorDimensionality.TWO_D,
         component_name="MockProcessor",
-        description="Mock processor (2D→2D)"
-    )
+        description="Mock processor (2D→2D)",
+    ),
 )
 
 
@@ -72,11 +72,13 @@ def demo_simple_serial():
     print("Demo 1: Simple Serial Pipeline (Interactive)")
     print("=" * 80)
 
-    pipeline = Serial(components=[
-        MockVectorizer("bert-base-uncased", 768),
-        MockProcessor(256),
-        MockProcessor(128),
-    ])
+    pipeline = Serial(
+        components=[
+            MockVectorizer("bert-base-uncased", 768),
+            MockProcessor(256),
+            MockProcessor(128),
+        ]
+    )
 
     # Generate interactive diagram
     diagram = visualize(
@@ -101,11 +103,13 @@ def demo_parallel_ensemble():
     print("Demo 2: Parallel Ensemble (Fan-out Structure)")
     print("=" * 80)
 
-    pipeline = Parallel(branches=[
-        MockVectorizer("bert-base-uncased", 768),
-        MockVectorizer("roberta-base", 768),
-        MockVectorizer("distilbert-base-uncased", 768),
-    ])
+    pipeline = Parallel(
+        branches=[
+            MockVectorizer("bert-base-uncased", 768),
+            MockVectorizer("roberta-base", 768),
+            MockVectorizer("distilbert-base-uncased", 768),
+        ]
+    )
 
     diagram = visualize(
         pipeline,
@@ -128,14 +132,18 @@ def demo_feature_fusion():
     print("Demo 3: Feature Fusion (Coproduct Morphism)")
     print("=" * 80)
 
-    pipeline = Serial(components=[
-        Parallel(branches=[
-            MockVectorizer("bert-base-uncased", 768),
-            MockVectorizer("sentence-transformers/all-MiniLM-L6-v2", 384),
-        ]),
-        GlobalConcat(dim=1),
-        MockProcessor(512),
-    ])
+    pipeline = Serial(
+        components=[
+            Parallel(
+                branches=[
+                    MockVectorizer("bert-base-uncased", 768),
+                    MockVectorizer("sentence-transformers/all-MiniLM-L6-v2", 384),
+                ]
+            ),
+            GlobalConcat(dim=1),
+            MockProcessor(512),
+        ]
+    )
 
     diagram = visualize(
         pipeline,
@@ -158,10 +166,12 @@ def demo_learn_mode():
     print("Demo 4: LEARN Mode (Category Theory Guide)")
     print("=" * 80)
 
-    pipeline = Serial(components=[
-        MockVectorizer("bert-base-uncased", 768),
-        MockProcessor(256),
-    ])
+    pipeline = Serial(
+        components=[
+            MockVectorizer("bert-base-uncased", 768),
+            MockProcessor(256),
+        ]
+    )
 
     diagram = visualize(
         pipeline,
@@ -184,10 +194,12 @@ def demo_debug_mode():
     print("Demo 5: DEBUG Mode (Code Location & Snippets)")
     print("=" * 80)
 
-    pipeline = Serial(components=[
-        MockVectorizer("roberta-base", 768),
-        MockProcessor(128),
-    ])
+    pipeline = Serial(
+        components=[
+            MockVectorizer("roberta-base", 768),
+            MockProcessor(128),
+        ]
+    )
 
     diagram = visualize(
         pipeline,
@@ -207,7 +219,13 @@ def demo_debug_mode():
 def main():
     """Run all interactive visualization demos."""
     print("\n" + "╔" + "=" * 78 + "╗")
-    print("║" + " " * 10 + "VectorMesh Interactive Category Theory Diagrams" + " " * 20 + "║")
+    print(
+        "║"
+        + " " * 10
+        + "VectorMesh Interactive Category Theory Diagrams"
+        + " " * 20
+        + "║"
+    )
     print("║" + " " * 15 + "Professional Mathematical Visualization" + " " * 23 + "║")
     print("╚" + "=" * 78 + "╝")
 

@@ -20,6 +20,7 @@ from vectormesh.types import NDTensor
 # Mock Components for Demo
 # =============================================================================
 
+
 class MockVectorizer:
     """Mock text vectorizer for demo."""
 
@@ -86,8 +87,8 @@ register_morphism(
         source=TensorDimensionality.TEXT,
         target=TensorDimensionality.TWO_D,
         component_name="MockVectorizer",
-        description="Mock 2D vectorizer (TEXT→2D)"
-    )
+        description="Mock 2D vectorizer (TEXT→2D)",
+    ),
 )
 
 register_morphism(
@@ -96,8 +97,8 @@ register_morphism(
         source=TensorDimensionality.TEXT,
         target=TensorDimensionality.THREE_D,
         component_name="Mock3DVectorizer",
-        description="Mock 3D vectorizer (TEXT→3D)"
-    )
+        description="Mock 3D vectorizer (TEXT→3D)",
+    ),
 )
 
 register_morphism(
@@ -106,8 +107,8 @@ register_morphism(
         source=TensorDimensionality.THREE_D,
         target=TensorDimensionality.TWO_D,
         component_name="MockAggregator",
-        description="Mock aggregator (3D→2D)"
-    )
+        description="Mock aggregator (3D→2D)",
+    ),
 )
 
 register_morphism(
@@ -116,8 +117,8 @@ register_morphism(
         source=TensorDimensionality.TWO_D,
         target=TensorDimensionality.TWO_D,
         component_name="MockProcessor",
-        description="Mock processor (2D→2D)"
-    )
+        description="Mock processor (2D→2D)",
+    ),
 )
 
 register_morphism(
@@ -126,8 +127,8 @@ register_morphism(
         source=TensorDimensionality.TWO_D,
         target=TensorDimensionality.TWO_D,
         component_name="Skip",
-        description="Residual skip connection (2D→2D)"
-    )
+        description="Residual skip connection (2D→2D)",
+    ),
 )
 
 register_morphism(
@@ -136,14 +137,15 @@ register_morphism(
         source=TensorDimensionality.TWO_D,
         target=TensorDimensionality.TWO_D,
         component_name="Gate",
-        description="Gating mechanism (2D→2D)"
-    )
+        description="Gating mechanism (2D→2D)",
+    ),
 )
 
 
 # =============================================================================
 # Demo Architectures
 # =============================================================================
+
 
 def print_separator(title: str):
     """Print a section separator."""
@@ -156,11 +158,13 @@ def demo_simple_serial():
     """Demo 1: Simple Serial Pipeline."""
     print_separator("Demo 1: Simple Serial Pipeline")
 
-    pipeline = Serial(components=[
-        MockVectorizer("sentence-transformers/all-MiniLM-L6-v2", 384),
-        MockProcessor(128),
-        MockProcessor(64),
-    ])
+    pipeline = Serial(
+        components=[
+            MockVectorizer("sentence-transformers/all-MiniLM-L6-v2", 384),
+            MockProcessor(128),
+            MockProcessor(64),
+        ]
+    )
 
     print("Architecture: Single embedding → dimension reduction")
     print("\nVisualization:")
@@ -171,11 +175,13 @@ def demo_parallel_ensemble():
     """Demo 2: Parallel Ensemble (Multiple Models)."""
     print_separator("Demo 2: Parallel Ensemble - Multi-Model Encoding")
 
-    pipeline = Parallel(branches=[
-        MockVectorizer("bert-base-uncased", 768),
-        MockVectorizer("roberta-base", 768),
-        MockVectorizer("sentence-transformers/all-MiniLM-L6-v2", 384),
-    ])
+    pipeline = Parallel(
+        branches=[
+            MockVectorizer("bert-base-uncased", 768),
+            MockVectorizer("roberta-base", 768),
+            MockVectorizer("sentence-transformers/all-MiniLM-L6-v2", 384),
+        ]
+    )
 
     print("Architecture: Multiple models encode text in parallel")
     print("\nVisualization:")
@@ -186,14 +192,18 @@ def demo_parallel_with_concat():
     """Demo 3: Parallel + GlobalConcat (Feature Fusion)."""
     print_separator("Demo 3: Parallel + GlobalConcat - Feature Fusion")
 
-    pipeline = Serial(components=[
-        Parallel(branches=[
-            MockVectorizer("bert-base-uncased", 768),
-            MockVectorizer("sentence-transformers/all-MiniLM-L6-v2", 384),
-        ]),
-        GlobalConcat(dim=1),
-        MockProcessor(256),
-    ])
+    pipeline = Serial(
+        components=[
+            Parallel(
+                branches=[
+                    MockVectorizer("bert-base-uncased", 768),
+                    MockVectorizer("sentence-transformers/all-MiniLM-L6-v2", 384),
+                ]
+            ),
+            GlobalConcat(dim=1),
+            MockProcessor(256),
+        ]
+    )
 
     print("Architecture: Multi-model → concatenate features → process")
     print("\nVisualization:")
@@ -204,11 +214,13 @@ def demo_3d_aggregation():
     """Demo 4: 3D Vectorization + Aggregation."""
     print_separator("Demo 4: 3D Vectorization + Aggregation")
 
-    pipeline = Serial(components=[
-        Mock3DVectorizer("mock-3d-model", 768, chunks=5),
-        MockAggregator("mean"),
-        MockProcessor(256),
-    ])
+    pipeline = Serial(
+        components=[
+            Mock3DVectorizer("mock-3d-model", 768, chunks=5),
+            MockAggregator("mean"),
+            MockProcessor(256),
+        ]
+    )
 
     print("Architecture: 3D chunked embedding → aggregate → process")
     print("\nVisualization:")
@@ -219,11 +231,13 @@ def demo_skip_connection():
     """Demo 5: Skip Connection (Residual Network)."""
     print_separator("Demo 5: Skip Connection - Residual Pattern")
 
-    pipeline = Serial(components=[
-        MockVectorizer("bert-base-uncased", 768),
-        Skip(main=MockProcessor(768)),  # Keep same dimension for residual
-        MockProcessor(256),
-    ])
+    pipeline = Serial(
+        components=[
+            MockVectorizer("bert-base-uncased", 768),
+            Skip(main=MockProcessor(768)),  # Keep same dimension for residual
+            MockProcessor(256),
+        ]
+    )
 
     print("Architecture: Encode → skip connection → final processing")
     print("\nVisualization:")
@@ -238,14 +252,13 @@ def demo_gated_pathway():
         """Router that computes gate value from input."""
         return 0.7  # In practice, this would be learned or computed
 
-    pipeline = Serial(components=[
-        MockVectorizer("roberta-base", 768),
-        Gate(
-            component=MockProcessor(768),
-            router=adaptive_gate
-        ),
-        MockProcessor(256),
-    ])
+    pipeline = Serial(
+        components=[
+            MockVectorizer("roberta-base", 768),
+            Gate(component=MockProcessor(768), router=adaptive_gate),
+            MockProcessor(256),
+        ]
+    )
 
     print("Architecture: Encode → gated processing → final layer")
     print("\nVisualization:")
@@ -257,22 +270,26 @@ def demo_complex_nested():
     print_separator("Demo 7: Complex Nested - Multi-Level Pipeline")
 
     # Branch 1: 3D → aggregated
-    branch1 = Serial(components=[
-        Mock3DVectorizer("longformer-base", 768, chunks=8),
-        MockAggregator("mean"),
-    ])
+    branch1 = Serial(
+        components=[
+            Mock3DVectorizer("longformer-base", 768, chunks=8),
+            MockAggregator("mean"),
+        ]
+    )
 
     # Branch 2: Simple 2D
     branch2 = MockVectorizer("sentence-transformers/all-mpnet-base-v2", 768)
 
     # Main pipeline: Parallel branches → concat → process
-    pipeline = Serial(components=[
-        Parallel(branches=[branch1, branch2]),
-        GlobalConcat(dim=1),
-        Skip(main=MockProcessor(1536)),  # 768 + 768 = 1536
-        MockProcessor(512),
-        MockProcessor(128),
-    ])
+    pipeline = Serial(
+        components=[
+            Parallel(branches=[branch1, branch2]),
+            GlobalConcat(dim=1),
+            Skip(main=MockProcessor(1536)),  # 768 + 768 = 1536
+            MockProcessor(512),
+            MockProcessor(128),
+        ]
+    )
 
     print("Architecture: Multi-branch (3D + 2D) → fusion → residual → reduction")
     print("\nVisualization:")
@@ -284,19 +301,23 @@ def demo_hierarchical_ensemble():
     print_separator("Demo 8: Hierarchical Ensemble - Model Stacking")
 
     # Create parallel ensemble
-    ensemble = Parallel(branches=[
-        MockVectorizer("bert-base-uncased", 768),
-        MockVectorizer("roberta-base", 768),
-        MockVectorizer("distilbert-base-uncased", 768),
-    ])
+    ensemble = Parallel(
+        branches=[
+            MockVectorizer("bert-base-uncased", 768),
+            MockVectorizer("roberta-base", 768),
+            MockVectorizer("distilbert-base-uncased", 768),
+        ]
+    )
 
     # Stack embeddings and process
-    pipeline = Serial(components=[
-        ensemble,
-        GlobalStack(dim=1),
-        MockAggregator("mean"),  # Aggregate across stacked models
-        MockProcessor(256),
-    ])
+    pipeline = Serial(
+        components=[
+            ensemble,
+            GlobalStack(dim=1),
+            MockAggregator("mean"),  # Aggregate across stacked models
+            MockProcessor(256),
+        ]
+    )
 
     print("Architecture: Multi-model → stack → aggregate → process")
     print("\nVisualization:")
@@ -308,25 +329,31 @@ def demo_dual_path_fusion():
     print_separator("Demo 9: Dual-Path Feature Fusion")
 
     # Semantic path
-    semantic_path = Serial(components=[
-        MockVectorizer("sentence-transformers/all-mpnet-base-v2", 768),
-        MockProcessor(512),
-    ])
+    semantic_path = Serial(
+        components=[
+            MockVectorizer("sentence-transformers/all-mpnet-base-v2", 768),
+            MockProcessor(512),
+        ]
+    )
 
     # Syntactic path (3D with aggregation)
-    syntactic_path = Serial(components=[
-        Mock3DVectorizer("mock-syntactic-model", 384, chunks=10),
-        MockAggregator("max"),
-        MockProcessor(512),
-    ])
+    syntactic_path = Serial(
+        components=[
+            Mock3DVectorizer("mock-syntactic-model", 384, chunks=10),
+            MockAggregator("max"),
+            MockProcessor(512),
+        ]
+    )
 
     # Fusion pipeline
-    pipeline = Serial(components=[
-        Parallel(branches=[semantic_path, syntactic_path]),
-        GlobalConcat(dim=1),
-        Skip(main=MockProcessor(1024)),
-        MockProcessor(256),
-    ])
+    pipeline = Serial(
+        components=[
+            Parallel(branches=[semantic_path, syntactic_path]),
+            GlobalConcat(dim=1),
+            Skip(main=MockProcessor(1024)),
+            MockProcessor(256),
+        ]
+    )
 
     print("Architecture: Dual processing paths → fusion → residual → output")
     print("\nVisualization:")
@@ -337,10 +364,13 @@ def demo_dual_path_fusion():
 # Main Demo Runner
 # =============================================================================
 
+
 def main():
     """Run all visualization demos."""
     print("\n" + "╔" + "=" * 78 + "╗")
-    print("║" + " " * 15 + "VectorMesh Architecture Visualization Demo" + " " * 20 + "║")
+    print(
+        "║" + " " * 15 + "VectorMesh Architecture Visualization Demo" + " " * 20 + "║"
+    )
     print("║" + " " * 20 + "Professional Mathematical Notation" + " " * 24 + "║")
     print("╚" + "=" * 78 + "╝")
 

@@ -9,26 +9,23 @@ This example demonstrates:
 import torch
 from vectormesh import TwoDVectorizer, ThreeDVectorizer, VectorMeshError
 
+
 def main():
     print("=== VectorMesh Vectorization Demo ===\n")
 
-    texts = [
-        "This is a short sentence.",
-        "Here is another one for the batch."
-    ]
+    texts = ["This is a short sentence.", "Here is another one for the batch."]
 
     # 1. 2D Vectorization (Sentence Transformers)
     print("--- 1. TwoDVectorizer (SentenceTransformer) ---")
     model_2d = "sentence-transformers/all-MiniLM-L6-v2"
     print(f"Loading {model_2d}...")
-    
+
     vec_2d = TwoDVectorizer(model_name=model_2d)
     embeddings_2d = vec_2d(texts)
-    
+
     print(f"Output type: {type(embeddings_2d)}")
     print(f"Shape: {embeddings_2d.shape} (batch, dim)")
     print("Success!\n")
-
 
     # 2. 3D Vectorization (Raw Transformers)
     print("--- 2. ThreeDVectorizer (Raw Transformer) ---")
@@ -42,14 +39,13 @@ def main():
     print(f"Shape: {embeddings_3d.shape} (batch, chunks, dim)")
     print("Success!\n")
 
-
     # 3. Error Handling Demo
     print("--- 3. Compatibility Checks (Error Handling) ---")
-    
+
     # Case A: Using TwoDVectorizer with a 3D model
     print("Attempting to load a 3D model (BERT) into TwoDVectorizer...")
     try:
-        TwoDVectorizer(model_name="bert-base-uncased")(["test"]) # Trigger lazy load
+        TwoDVectorizer(model_name="bert-base-uncased")(["test"])  # Trigger lazy load
     except VectorMeshError as e:
         print(f"\n[Caught Expected Error]: {e}")
         print(f"Hint: {e.hint}")
@@ -65,6 +61,7 @@ def main():
         print(f"Fix:  {e.fix}\n")
 
     print("=== Demo Complete ===")
+
 
 if __name__ == "__main__":
     main()

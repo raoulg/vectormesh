@@ -45,9 +45,7 @@ def main():
 
     # 2. Create vectorizer
     print("\nInitializing vectorizer...")
-    vectorizer = TwoDVectorizer(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
-    )
+    vectorizer = TwoDVectorizer(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
     # 3. Create cache
     print("\nCreating vector cache...")
@@ -55,7 +53,7 @@ def main():
         texts=texts,
         vectorizer=vectorizer,
         name="train_cache",
-        batch_size=32  # Process 32 texts at a time
+        batch_size=32,  # Process 32 texts at a time
     )
     print(f"Cache created: {cache.name}")
 
