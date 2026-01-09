@@ -56,13 +56,13 @@ development_status:
   2-2-syntactic-sugar-operator: backlog
   2-3-connectors-concat-stack: review
   2-4-gating-mechanisms: review  # Basic Skip & Gate (no magic)
-  2-5-complex-gating: backlog  # MoE, Highway, learnable gates
+  2-5-complex-gating: review  # MoE, Highway, learnable gates
   2-6-component-visualization: done  # Mathematical notation visualization
   epic-2-retrospective: optional
 
   # Epic 3: Extensible Vectorization & Data
-  epic-3: backlog
-  3-1-regexvectorizer: backlog
+  epic-3: in-progress
+  3-1-regexvectorizer: review
   3-2-smart-dataloader: backlog
   3-3-custom-base-aggregator: backlog
   3-4-dataset-validation: backlog

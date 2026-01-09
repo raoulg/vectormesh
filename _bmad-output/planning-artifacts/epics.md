@@ -357,7 +357,14 @@ Output: (ℝ^{B×384}, ℝ^{B×768})
 ### Story 3.1: RegexVectorizer
 As a feature engineer,
 I want to create binary vectors based on regex pattern matches,
-So that I can extract explicit features (e.g., "contains_email", "is_capitalized") alongside semantic embeddings.
+So that I can extract explicit features. Some examples of what i would like to find is:
+- "artikel 265 Boek 3 van het Burgerlijk Wetboek" should be detected, another variantion is "artikel 7:2 Burgerlijk Wetboek"
+- "artikel 7:26 lid 3 van het Burgerlijk Wetboek" can also be a variation
+- "artikelen 6:251 en 6:252 Burgerlijk Wetboek"  should detect both 6:251 and 6:252
+- "artikel 55 Wet Bodembescherming" is interesting as well, because it is a "wet"
+- but "artikel 6.5 en 31.5 van de koopovereenkomst" should NOT be detected; this is not "wetboek" but koopovereenkomst.
+
+And it should be clear that i want to find artikelen, regardless of the formulation (6:252 or 265 boek 3, both variations should detect just the number) but obviously searching for [0-9];[0-9]+ wont be good enough, because we need to find also the mention of the wetboek, etc.
 
 **Acceptance Criteria:**
 
