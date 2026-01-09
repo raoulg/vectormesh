@@ -13,9 +13,9 @@ from datasets import Dataset, load_from_disk
 from pydantic import ConfigDict, Field
 
 from vectormesh.types import VectorMeshComponent, VectorMeshError
-from vectormesh.components.vectorizers import BaseVectorizer
+from vectormesh.components.vectorizers import Vectorizer
 
-TVectorizer = TypeVar("TVectorizer", bound=BaseVectorizer)
+TVectorizer = TypeVar("TVectorizer", bound=Vectorizer)
 
 class VectorCache(VectorMeshComponent, Generic[TVectorizer]):
     """Cache embeddings to disk using HuggingFace Datasets (Arrow/Parquet format).

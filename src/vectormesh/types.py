@@ -13,11 +13,11 @@ from pydantic import BaseModel, ConfigDict
 OneDTensor = Float[Tensor, "dim"]
 OneDTensor.__doc__ = "1D Tensor representing a single vector. Shape: (dim,)"
 
-TwoDTensor = Float[Tensor, "batch embed"]
-TwoDTensor.__doc__ = "2D Tensor representing a batch of embeddings. Shape: (batch, embed)"
+TwoDTensor = Float[Tensor, "chunks dim"]
+TwoDTensor.__doc__ = "2D Tensor representing, eg (chunks, dim)"
 
-ThreeDTensor = Float[Tensor, "batch chunks embed"]
-ThreeDTensor.__doc__ = "3D Tensor representing a batch of chunked embeddings. Shape: (batch, chunks, embed)"
+ThreeDTensor = Float[Tensor, "chunks tokens dim"]
+ThreeDTensor.__doc__ = "3D Tensor, eg (chunks, tokens, dim)"
 
 FourDTensor = Float[Tensor, "batch chunks tokens embed"]
 FourDTensor.__doc__ = "4D Tensor representing a batch of chunked token embeddings. Shape: (batch, chunks, tokens, embed)"

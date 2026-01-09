@@ -6,7 +6,7 @@ from .aggregation import (
     MaxAggregator,
     get_aggregator,
 )
-from .vectorizers import BaseVectorizer, TwoDVectorizer, ThreeDVectorizer
+from .vectorizers import Vectorizer
 from .regex import RegexVectorizer
 from .combinators import Serial, Parallel
 from .connectors import GlobalConcat, GlobalStack
@@ -17,9 +17,7 @@ __all__ = [
     "MeanAggregator",
     "MaxAggregator",
     "get_aggregator",
-    "BaseVectorizer",
-    "TwoDVectorizer",
-    "ThreeDVectorizer",
+    "Vectorizer",
     "RegexVectorizer",
     "Serial",
     "Parallel",

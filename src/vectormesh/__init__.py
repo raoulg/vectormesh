@@ -6,13 +6,15 @@ from .components.aggregation import (
     MaxAggregator,
     get_aggregator,
 )
-from .components.vectorizers import BaseVectorizer, TwoDVectorizer, ThreeDVectorizer
+from .components.vectorizers import Vectorizer
 from .components.combinators import Serial, Parallel
 from .components.connectors import GlobalConcat, GlobalStack
 from .visualization import visualize
 from .data import VectorCache
 from .validation import validate_composition, validate_parallel, MorphismComposition, Morphism, TensorDimensionality
 from . import zoo
+from loguru import logger
+import sys
 
 __all__ = [
     "VectorMeshComponent",
@@ -26,9 +28,7 @@ __all__ = [
     "MeanAggregator",
     "MaxAggregator",
     "get_aggregator",
-    "BaseVectorizer",
-    "TwoDVectorizer",
-    "ThreeDVectorizer",
+    "Vectorizer",
     "RegexVectorizer",
     "Serial",
     "Parallel",
@@ -44,5 +44,6 @@ __all__ = [
     "zoo",
 ]
 
-def main() -> None:
-    print("Hello from vectormesh!")
+logger.remove()
+logger.add(sys.stderr, level="INFO")
+logger.add("logs/dataset.log", rotation="10 MB", level="DEBUG")
