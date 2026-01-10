@@ -15,6 +15,7 @@ from .validation import validate_composition, validate_parallel, MorphismComposi
 from . import zoo
 from loguru import logger
 import sys
+from importlib.metadata import version
 
 __all__ = [
     "VectorMeshComponent",
@@ -47,3 +48,5 @@ __all__ = [
 logger.remove()
 logger.add(sys.stderr, level="INFO")
 logger.add("logs/dataset.log", rotation="10 MB", level="DEBUG")
+
+__version__ = version("vectormesh")
