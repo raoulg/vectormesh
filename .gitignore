@@ -1,5 +1,6 @@
 # Project data
 assets/**
+artefacts/**
 
 # Python
 **/__pycache__/
@@ -28,3 +29,4 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+dev/*
