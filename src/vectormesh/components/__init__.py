@@ -1,22 +1,12 @@
 """VectorMesh components module."""
 
-from .aggregation import (
-    BaseAggregator,
-    MeanAggregator,
-    MaxAggregator,
-    get_aggregator,
-)
-from .vectorizers import Vectorizer
-from .regex import RegexVectorizer
-from .combinators import Serial, Parallel
+from .combinators import Parallel, Serial
 from .connectors import GlobalConcat, GlobalStack
-from .gating import Skip, Gate, Highway, Switch, LearnableGate, MoE
+from .gating import Gate, Highway, LearnableGate, MoE, Skip, Switch
+from .regex import RegexVectorizer
+from .vectorizers import Vectorizer
 
 __all__ = [
-    "BaseAggregator",
-    "MeanAggregator",
-    "MaxAggregator",
-    "get_aggregator",
     "Vectorizer",
     "RegexVectorizer",
     "Serial",

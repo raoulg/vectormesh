@@ -4,24 +4,23 @@ Centralized types, base classes, and errors for VectorMesh.
 This module contains all foundational types and classes used throughout VectorMesh.
 """
 
-from typing import Union, Optional
-from torch import Tensor
+from typing import Optional, Union
+
 from jaxtyping import Float
 from pydantic import BaseModel, ConfigDict
+from torch import Tensor
 
+OneDTensor = Float[Tensor, "?batch"]
+OneDTensor.__doc__ = "1D Tensor representing a single vector. Shape: (batch,)"
 
-OneDTensor = Float[Tensor, "dim"]
-OneDTensor.__doc__ = "1D Tensor representing a single vector. Shape: (dim,)"
+TwoDTensor = Float[Tensor, "batch tokens"]
+TwoDTensor.__doc__ = "2D Tensor representing, eg (batch, tokens)"
 
-TwoDTensor = Float[Tensor, "chunks dim"]
-TwoDTensor.__doc__ = "2D Tensor representing, eg (chunks, dim)"
-
-ThreeDTensor = Float[Tensor, "chunks tokens dim"]
-ThreeDTensor.__doc__ = "3D Tensor, eg (chunks, tokens, dim)"
+ThreeDTensor = Float[Tensor, "batch tokens dim"]
+ThreeDTensor.__doc__ = "3D Tensor, eg (batch, tokens, dim)"
 
 FourDTensor = Float[Tensor, "batch chunks tokens embed"]
 FourDTensor.__doc__ = "4D Tensor representing a batch of chunked token embeddings. Shape: (batch, chunks, tokens, embed)"
-
 
 
 NDTensor = Union[TwoDTensor, ThreeDTensor]
@@ -37,7 +36,6 @@ Usage:
 """
 
 
-
 class VectorMeshComponent(BaseModel):
     """
     Base class for all VectorMesh components.
@@ -45,6 +43,7 @@ class VectorMeshComponent(BaseModel):
     Enforces strict validation and immutable configuration using Pydantic.
     All vectorizers, aggregators, and combinators inherit from this base.
     """
+
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
 
@@ -67,7 +66,10 @@ class VectorMeshError(Exception):
             fix="Insert MeanAggregator() to convert 3D → 2D"
         )
     """
-    def __init__(self, message: str, hint: Optional[str] = None, fix: Optional[str] = None):
+
+    def __init__(
+        self, message: str, hint: Optional[str] = None, fix: Optional[str] = None
+    ):
         super().__init__(message)
         self.hint = hint
         self.fix = fix
