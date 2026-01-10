@@ -3,13 +3,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Generic, Optional, TypeVar, get_args, get_type_hints
 
-from datasets import Dataset, Features, Sequence, Value
+from datasets import Dataset, Features, Sequence, Value, load_from_disk
 from loguru import logger
 
-from vectormesh import __version__
+from vectormesh.components.vectorizers import BaseVectorizer
 from vectormesh.types import VectorMeshComponent, VectorMeshError
 
-TVectorizer = TypeVar("TVectorizer", bound=Vectorizer)
+TVectorizer = TypeVar("TVectorizer", bound=BaseVectorizer)
 
 
 class VectorCache(VectorMeshComponent, Generic[TVectorizer]):
@@ -29,7 +29,10 @@ class VectorCache(VectorMeshComponent, Generic[TVectorizer]):
         vector_batch: Optional[int] = 32,
         map_batch: Optional[int] = 32,
     ) -> "VectorCache[TVectorizer]":
+        from vectormesh import __version__
+
         vtype = vectorizer.__class__.__name__
+
         tensord = cls.get_dtensor(vectorizer)
         if not cache_dir.exists():
             cache_dir.mkdir(parents=True, exist_ok=True)
@@ -60,6 +63,7 @@ class VectorCache(VectorMeshComponent, Generic[TVectorizer]):
                 "tensordtype": cls.get_dtensor(vectorizer),
                 "hidden_size": vectorizer.get_hidden_size,
                 "context_size": vectorizer.get_context_size,
+                "chunk_sizes": dict(vectorizer.chunk_sizes),
                 "created_at": datetime.now().isoformat(),
                 "num_observations": len(new_dataset),
             }
@@ -83,22 +87,22 @@ class VectorCache(VectorMeshComponent, Generic[TVectorizer]):
         )
 
     @classmethod
-    def load(cls, cache_dir: Path) -> "Cache[TVectorizer]":
-        metadata_path = cache_dir / "metadata.json"
-        if not cache_dir.exists():
-            raise VectorMeshError(f"Cache directory {cache_dir} does not exist.")
+    def load(cls, path: Path) -> "Cache[TVectorizer]":
+        metadata_path = path / "metadata.json"
+        if not path.exists():
+            raise VectorMeshError(f"Directory {path} does not exist.")
         if not metadata_path.exists():
             raise VectorMeshError(f"Metadata file {metadata_path} does not exist.")
 
-        dataset = load_from_disk(filepath)
+        dataset = load_from_disk(path)
         dataset.set_format(type="torch")
         with open(metadata_path, "r") as f:
             metadata = json.load(f)
 
-        logger.success(f"Cache loaded from {filepath}")
+        logger.success(f"Cache loaded from {path}")
         return cls(
-            name=cachetag,
-            cache_dir=cache_dir,
+            name=path.stem,
+            cache_dir=path.parent.resolve(),
             dataset=dataset,
             metadata=metadata,
         )
