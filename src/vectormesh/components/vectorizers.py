@@ -1,6 +1,7 @@
 """Text vectorization components using HuggingFace models."""
 
 from abc import ABC, abstractmethod
+from collections import Counter
 from typing import Any
 
 import torch
@@ -99,6 +100,7 @@ class Vectorizer(BaseVectorizer):
     _tokenizer: Any = PrivateAttr()
     _model: Any = PrivateAttr()
     _stride: int = PrivateAttr()
+    chunk_sizes: Counter = Counter()
 
     @model_validator(mode="after")
     def initialize_model(self):
@@ -223,6 +225,7 @@ class Vectorizer(BaseVectorizer):
         for doc_idx in range(num_docs):
             idx = overflow == doc_idx
             embed = agg[idx]
+            self.chunk_sizes[embed.shape[0]] += 1
             regrouped.append(embed)
         return {"embedding": regrouped}
 
