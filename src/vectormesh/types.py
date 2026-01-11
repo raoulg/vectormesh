@@ -1,18 +1,5 @@
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict
-
-
-class VectorMeshComponent(BaseModel):
-    """
-    Base class for all VectorMesh components.
-
-    Enforces strict validation and immutable configuration using Pydantic.
-    All vectorizers, aggregators, and combinators inherit from this base.
-    """
-
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
-
 
 class VectorMeshError(Exception):
     """
@@ -25,13 +12,6 @@ class VectorMeshError(Exception):
         message: Primary error message
         hint: Educational hint about what went wrong
         fix: Suggested fix or next steps
-
-    Example:
-        raise VectorMeshError(
-            message="Cannot compose 2D → 3D tensors",
-            hint="Shape mismatch in pipeline",
-            fix="Insert MeanAggregator() to convert 3D → 2D"
-        )
     """
 
     def __init__(

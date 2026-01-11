@@ -6,27 +6,28 @@ from .aggregation import (
     MeanAggregator,
     RNNAggregator,
 )
-from .connectors import Concatenate2D
-from .gating import Gate, Highway, Skip
+from .connectors import Concatenate2D, Stack2D
+from .gating import Gate, Highway, MoE, Skip
+from .neural import Attention, NeuralNet, Projection
 from .padding import DynamicPadding, FixedPadding
 from .pipelines import Parallel, Serial
 
 __all__ = [
-    # Pipelines
-    "Serial",
-    "Parallel",
-    # Aggregation
+    "AttentionAggregator",
     "BaseAggregator",
     "MeanAggregator",
-    "AttentionAggregator",
     "RNNAggregator",
-    # Connectors
     "Concatenate2D",
-    # Padding
-    "DynamicPadding",
-    "FixedPadding",
-    # Residual & Gating
-    "Skip",
+    "Stack2D",
     "Gate",
     "Highway",
+    "Skip",
+    "MoE",
+    "NeuralNet",
+    "Projection",
+    "Attention",
+    "DynamicPadding",
+    "FixedPadding",
+    "Parallel",
+    "Serial",
 ]
