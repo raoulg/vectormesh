@@ -1,13 +1,11 @@
-import sys
+import json
+from collections import Counter
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union, Set
+from typing import Dict, List, Set, Tuple
 
 import torch
 from datasets import Dataset
-from loguru import logger
 from tqdm import tqdm
-import json
-from collections import Counter
 
 
 class LabelEncoder:
@@ -78,6 +76,7 @@ class LabelEncoder:
 
 #         return text, label_tensor
 
+
 def aktes_threshold(file_path: Path, threshold: int) -> Tuple[Dataset, Set[int]]:
     # load texts from jsonl
     texts = []
@@ -92,26 +91,25 @@ def aktes_threshold(file_path: Path, threshold: int) -> Tuple[Dataset, Set[int]]
         all_codes.update(set(codes))
 
     # apply threshold
-    codes = {k for k,v in all_codes.items() if v >= threshold}
+    codes = {k for k, v in all_codes.items() if v >= threshold}
 
     # select texts that have the codes over the threshold
     selected = []
     for text, label_list in texts:
         # Keep only codes that passed the threshold
         filtered_labels = [c for c in label_list if c in codes]
-        
+
         # Only add to dataset if there's at least one label left after filtering
         if filtered_labels:
-            selected.append({
-                "text": text, 
-                "target": filtered_labels
-            })
+            selected.append({"text": text, "target": filtered_labels})
     dataset = Dataset.from_list(selected)
-        
+
     return dataset, codes
 
 
-def generate_splits(path: Path, threshold: int, trainsplit: float, testvalsplit: float) -> Tuple[Dict[str, Dataset], Set[int]]:
+def generate_splits(
+    path: Path, threshold: int, trainsplit: float, testvalsplit: float
+) -> Tuple[Dict[str, Dataset], Set[int]]:
     data, codes = aktes_threshold(file_path=path, threshold=threshold)
     full_set = data.train_test_split(train_size=trainsplit)
     train = full_set["train"]
@@ -125,6 +123,3 @@ def generate_splits(path: Path, threshold: int, trainsplit: float, testvalsplit:
         "valid": valid,
         "test": test,
     }, codes
-
-    
-    
