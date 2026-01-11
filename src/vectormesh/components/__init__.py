@@ -1,22 +1,32 @@
 """VectorMesh components module."""
 
-from .combinators import Parallel, Serial
-from .connectors import GlobalConcat, GlobalStack
-from .gating import Gate, Highway, LearnableGate, MoE, Skip, Switch
-from .regex import RegexVectorizer
-from .vectorizers import Vectorizer
+from .aggregation import (
+    AttentionAggregator,
+    BaseAggregator,
+    MeanAggregator,
+    RNNAggregator,
+)
+from .connectors import Concatenate2D
+from .gating import Gate, Highway, Skip
+from .padding import DynamicPadding, FixedPadding
+from .pipelines import Parallel, Serial
 
 __all__ = [
-    "Vectorizer",
-    "RegexVectorizer",
+    # Pipelines
     "Serial",
     "Parallel",
-    "GlobalConcat",
-    "GlobalStack",
+    # Aggregation
+    "BaseAggregator",
+    "MeanAggregator",
+    "AttentionAggregator",
+    "RNNAggregator",
+    # Connectors
+    "Concatenate2D",
+    # Padding
+    "DynamicPadding",
+    "FixedPadding",
+    # Residual & Gating
     "Skip",
     "Gate",
     "Highway",
-    "Switch",
-    "LearnableGate",
-    "MoE",
 ]

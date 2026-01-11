@@ -38,7 +38,10 @@ class MeanAggregator(BaseAggregator):
 
 
 class AttentionAggregator(BaseAggregator):
-    """Aggregate using learnable attention over chunks."""
+    """Aggregate using learnable attention over chunks.
+    Because attention does not handle variable-length sequences,
+    we actually get (batch, chunks, dim) where chunks is fixed.
+    """
 
     def __init__(self, hidden_size: int):
         """initialize learnable parameters."""
