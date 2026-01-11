@@ -17,7 +17,7 @@ def visualize(component: Any) -> str:
     - Hierarchical structure for nested combinators
 
     Args:
-        component: VectorMeshComponent or combinator to visualize
+        component: combinator to visualize
                    (Serial, Parallel, or single component)
 
     Returns:
@@ -33,7 +33,7 @@ def visualize(component: Any) -> str:
         N/A - utility function, no tensor processing
     """
     # Import here to avoid circular imports
-    from vectormesh.components.combinators import Serial, Parallel
+    from vectormesh.components.combinators import Parallel, Serial
 
     # Detect component type and route to appropriate visualizer
     if isinstance(component, Serial):
@@ -53,7 +53,7 @@ def _visualize_serial(serial: Any) -> str:
     Returns:
         String showing sequential flow with arrows
     """
-    from vectormesh.components.combinators import Serial, Parallel
+    from vectormesh.components.combinators import Parallel, Serial
 
     components = serial.components
     if not components:
@@ -87,7 +87,7 @@ def _visualize_parallel(parallel: Any) -> str:
     Returns:
         String showing branching topology with tree characters
     """
-    from vectormesh.components.combinators import Serial, Parallel
+    from vectormesh.components.combinators import Parallel, Serial
 
     branches = parallel.branches
     if not branches:
@@ -155,11 +155,11 @@ def _format_component(component: Any) -> str:
     params = []
 
     # Check for model_name (vectorizers)
-    if hasattr(component, 'model_name'):
+    if hasattr(component, "model_name"):
         params.append(f'"{component.model_name}"')
 
     # Check for dim (connectors)
-    if hasattr(component, 'dim'):
+    if hasattr(component, "dim"):
         params.append(f"dim={component.dim}")
 
     # Format with parameters
@@ -181,7 +181,7 @@ def _infer_shape(component: Any) -> str:
     Returns:
         String like "ℝ^{B×768}" or "ℝ^{B×C×384}"
     """
-    from vectormesh.components.combinators import Serial, Parallel
+    from vectormesh.components.combinators import Parallel, Serial
 
     # Handle combinators
     if isinstance(component, Serial):
@@ -200,14 +200,14 @@ def _infer_shape(component: Any) -> str:
 
     # Try to get embedding dimension
     embedding_dim = None
-    if hasattr(component, 'embedding_dim'):
+    if hasattr(component, "embedding_dim"):
         embedding_dim = component.embedding_dim
-    elif hasattr(component, 'output_dim'):
+    elif hasattr(component, "output_dim"):
         embedding_dim = component.output_dim
 
     # Try to get output mode (2d vs 3d)
     output_mode = None
-    if hasattr(component, 'output_mode'):
+    if hasattr(component, "output_mode"):
         output_mode = component.output_mode
 
     # Construct mathematical notation

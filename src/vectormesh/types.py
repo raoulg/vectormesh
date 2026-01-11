@@ -1,39 +1,6 @@
-"""
-Centralized types, base classes, and errors for VectorMesh.
+from typing import Optional
 
-This module contains all foundational types and classes used throughout VectorMesh.
-"""
-
-from typing import Optional, Union
-
-from jaxtyping import Float
 from pydantic import BaseModel, ConfigDict
-from torch import Tensor
-
-OneDTensor = Float[Tensor, "?batch"]
-OneDTensor.__doc__ = "1D Tensor representing a single vector. Shape: (batch,)"
-
-TwoDTensor = Float[Tensor, "batch tokens"]
-TwoDTensor.__doc__ = "2D Tensor representing, eg (batch, tokens)"
-
-ThreeDTensor = Float[Tensor, "batch tokens dim"]
-ThreeDTensor.__doc__ = "3D Tensor, eg (batch, tokens, dim)"
-
-FourDTensor = Float[Tensor, "batch chunks tokens embed"]
-FourDTensor.__doc__ = "4D Tensor representing a batch of chunked token embeddings. Shape: (batch, chunks, tokens, embed)"
-
-
-NDTensor = Union[TwoDTensor, ThreeDTensor]
-NDTensor.__doc__ = """
-Union of all supported tensor dimensions in VectorMesh.
-
-Currently supports 2D and 3D tensors. When 4D support is added,
-just update this single type definition to include FourDTensor.
-
-Usage:
-    def process(tensor: NDTensor) -> NDTensor: ...
-    def aggregate(input: NDTensor) -> TwoDTensor: ...
-"""
 
 
 class VectorMeshComponent(BaseModel):
