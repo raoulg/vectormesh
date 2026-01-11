@@ -6,8 +6,9 @@ from typing import Generic, Optional, TypeVar, get_args, get_type_hints
 from datasets import Dataset, Features, Sequence, Value, load_from_disk
 from loguru import logger
 
-from vectormesh.components.vectorizers import BaseVectorizer
 from vectormesh.types import VectorMeshComponent, VectorMeshError
+
+from .vectorizers import BaseVectorizer
 
 TVectorizer = TypeVar("TVectorizer", bound=BaseVectorizer)
 
