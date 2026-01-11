@@ -5,6 +5,7 @@ from typing import Dict, List, Set, Tuple
 
 import torch
 from datasets import Dataset
+from loguru import logger
 from tqdm import tqdm
 
 
@@ -29,7 +30,7 @@ class LabelEncoder:
     def __len__(self) -> int:
         return len(self.idx2code)
 
-    def encode(self, codes: List[int]) -> torch.Tensor:
+    def onehot(self, codes: List[int]) -> torch.Tensor:
         """Converts a list of raw codes into a Multi-Hot Tensor."""
         # Create a vector of zeros with length equal to total classes
         vector = torch.zeros(len(self), dtype=torch.float32)
@@ -43,38 +44,57 @@ class LabelEncoder:
                 vector[self.unknown_idx] = 1.0
         return vector
 
-    def decode(self, vector: torch.Tensor) -> List[int]:
+    def encode(self, codes: list[int]) -> list[int]:
+        """Converts a list of raw codes into a list of dense indices."""
+        indices = []
+        for code in codes:
+            if code in self.code2idx:
+                indices.append(self.code2idx[code])
+            else:
+                indices.append(self.unknown_idx)
+        return indices
+
+    def decode(self, vector: torch.Tensor, threshold: float) -> List[int]:
         """Converts a Multi-Hot Tensor/Probabilities back to raw codes."""
-        # Get indices where value is high (assuming threshold 0.5 for logits)
-        indices = (vector > 0.5).nonzero(as_tuple=True)[0]
+        indices = (vector > threshold).nonzero(as_tuple=True)[0]
         decoded = []
         for idx in indices:
             idx_val = idx.item()
-            if idx_val in self.idx2code:
+            try:
                 decoded.append(self.idx2code[idx_val])
-            else:
-                # Should not happen if logic is correct, but safe fallback
-                decoded.append(0)
+            except KeyError:
+                raise KeyError(f"Index {idx_val} not found in idx2code mapping.")
         return decoded
 
+    def save(self, filepath: Path) -> None:
+        """Save the encoder mappings to a JSON file."""
+        filepath = Path(filepath)
+        data = {
+            "code2idx": {str(k): v for k, v in self.code2idx.items()},
+            "idx2code": {str(k): v for k, v in self.idx2code.items()},
+            "unique_codes": self.unique_codes,
+            "unknown_idx": self.unknown_idx,
+        }
+        with open(filepath, "w") as f:
+            json.dump(data, f, indent=2)
 
-# class RechtsfeitDataset():
-#     def __init__(self, hf_dataset: HFDataset, encoder: LabelEncoder):
-#         self.dataset = hf_dataset
-#         self.encoder = encoder
+    @classmethod
+    def from_file(cls, filepath: str | Path) -> "LabelEncoder":
+        """Load an encoder from a JSON file."""
+        filepath = Path(filepath)
+        with open(filepath, "r") as f:
+            data = json.load(f)
 
-#     def __len__(self) -> int:
-#         return len(self.dataset)
+        # Create a minimal instance without calling __init__
+        encoder = cls.__new__(cls)
 
-#     def __getitem__(self, idx: int) -> Tuple[str, torch.Tensor]:
-#         item = self.dataset[idx]
-#         text: str = item["text"]
-#         raw_codes: List[int] = item["rechtsfeitcodes"]
+        # Restore attributes, converting string keys back to integers
+        encoder.code2idx = {int(k): v for k, v in data["code2idx"].items()}
+        encoder.idx2code = {int(k): v for k, v in data["idx2code"].items()}
+        encoder.unique_codes = data["unique_codes"]
+        encoder.unknown_idx = data["unknown_idx"]
 
-#         # Transform raw codes to Multi-Hot Tensor
-#         label_tensor: torch.Tensor = self.encoder.encode(raw_codes)
-
-#         return text, label_tensor
+        return encoder
 
 
 def aktes_threshold(file_path: Path, threshold: int) -> Tuple[Dataset, Set[int]]:
@@ -110,6 +130,16 @@ def aktes_threshold(file_path: Path, threshold: int) -> Tuple[Dataset, Set[int]]
 def generate_splits(
     path: Path, threshold: int, trainsplit: float, testvalsplit: float
 ) -> Tuple[Dict[str, Dataset], Set[int]]:
+    """
+    Args:
+        path (Path): location of the jsonl file
+        threshold (int): minimum frequency for a code to be included
+        trainsplit (float): the fraction of data to use for training
+        testvalsplit (float): the fraction of the remaining data (after train split) to use for validation
+
+    Returns:
+        Tuple[Dict[str, Dataset], Set[int]]: _description_
+    """
     data, codes = aktes_threshold(file_path=path, threshold=threshold)
     full_set = data.train_test_split(train_size=trainsplit)
     train = full_set["train"]
@@ -123,3 +153,33 @@ def generate_splits(
         "valid": valid,
         "test": test,
     }, codes
+
+
+def build(
+    input_file: Path,
+    threshold: int,
+    trainsplit: float,
+    testvalsplit: float,
+    output_dir: Path,
+) -> None:
+    datasets, codes = generate_splits(
+        path=input_file,
+        threshold=threshold,
+        trainsplit=trainsplit,
+        testvalsplit=testvalsplit,
+    )
+    datasettag = f"theshold_{threshold}_{datasets['train']._fingerprint}"
+    datadir = output_dir / Path(f"aktes_{datasettag}")
+    datadir = datadir.resolve()
+    logger.info(f"Saving processed data to {datadir}")
+    if not datadir.exists():
+        datadir.mkdir(parents=True, exist_ok=True)
+    le = LabelEncoder(codes)
+    le_file = Path("labelencoder.json")
+    le.save(datadir / le_file)
+    for split in ["train", "test", "valid"]:
+        dataset = datasets[split]
+        labeled = dataset.map(lambda x: {"labels": le.encode(x["target"])})
+        filepath = datadir / Path(f"{split}")
+        labeled.save_to_disk(filepath)
+    logger.success(f"Processed data saved to {datadir}")
