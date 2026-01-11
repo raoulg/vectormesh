@@ -29,17 +29,24 @@ class VectorCache(VectorMeshComponent, Generic[TVectorizer]):
         features: Optional[Features] = None,
         vector_batch: Optional[int] = 32,
         map_batch: Optional[int] = 32,
+        column_name: Optional[str] = None,
     ) -> "VectorCache[TVectorizer]":
         from vectormesh import __version__
 
         vtype = vectorizer.__class__.__name__
+        embedding_column = vectorizer.col_name or column_name
 
         tensord = cls.get_dtensor(vectorizer)
+
         if not cache_dir.exists():
             cache_dir.mkdir(parents=True, exist_ok=True)
             logger.info(f"Created cache directory at {cache_dir}")
+
         if features is None:
-            features = cls.get_features(vectorizer, tensord)
+            features = cls.get_features(
+                dataset, tensord, embedding_column=embedding_column
+            )
+
         cachetag = f"{dataset_tag}_{tensord}d_{vectorizer.get_hidden_size}"
         filepath = cache_dir / cachetag
         metadata_path = filepath / "metadata.json"
@@ -64,6 +71,7 @@ class VectorCache(VectorMeshComponent, Generic[TVectorizer]):
                 "tensordtype": cls.get_dtensor(vectorizer),
                 "hidden_size": vectorizer.get_hidden_size,
                 "context_size": vectorizer.get_context_size,
+                "features": list(features.keys()),
                 "chunk_sizes": dict(vectorizer.chunk_sizes),
                 "created_at": datetime.now().isoformat(),
                 "num_observations": len(new_dataset),
@@ -109,21 +117,16 @@ class VectorCache(VectorMeshComponent, Generic[TVectorizer]):
         )
 
     @staticmethod
-    def get_features(vectorizer: TVectorizer, tensord: int) -> Features:
+    def get_features(dataset: Dataset, tensord: int, embedding_column: str) -> Features:
+        """Extract the embedding feature creation logic"""
+        features = dataset.features.copy()
         if tensord == 2:
-            embedding_feature = Sequence(Sequence(Value("float32")))  # (chunks, 768)
+            embedding_feature = Sequence(Sequence(Value("float32")))  # (chunks, dim)
         elif tensord == 1:
-            embedding_feature = Sequence(Value("float32"))  # (768,)
+            embedding_feature = Sequence(Value("float32"))  # (dim,)
         else:
             raise ValueError(f"Unsupported tensor dtype with {tensord} dimensions.")
-
-        features = Features(
-            {
-                "text": Value("string"),
-                "target": Sequence(Value("int32")),
-                "embedding": embedding_feature,
-            }
-        )
+        features[embedding_column] = embedding_feature
         return features
 
     @staticmethod

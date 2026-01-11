@@ -35,6 +35,7 @@ class BaseVectorizer(VectorMeshComponent, ABC):
     """
 
     model_name: str
+    col_name: str
     device: str = Field(default_factory=detect_device)
 
     _metadata: Any = PrivateAttr()
@@ -59,14 +60,14 @@ class BaseVectorizer(VectorMeshComponent, ABC):
         self, texts: list[str], batchsize: int
     ) -> dict[str, list[Float[Tensor, "..."]]]:
         """
-        Process texts and return embeddings.
+        Process texts and return embedding.
 
         Args:
             texts: List of input texts
             batchsize: Batch size for processing
 
         Returns:
-            Dict with 'embedding' key containing list of tensors.
+            Dict with '{self.col_name : list[Tensor]}'.
             Tensor dimensionality varies by implementation
         """
         pass
@@ -79,6 +80,7 @@ class BaseVectorizer(VectorMeshComponent, ABC):
         """
         return {
             "model_name": self.model_name,
+            "col_name": self.col_name,
             "hidden_size": getattr(self._metadata, "hidden_size"),
             "context_size": getattr(self._metadata, "max_position_embeddings"),
         }
@@ -94,6 +96,7 @@ class BaseVectorizer(VectorMeshComponent, ABC):
 
 class Vectorizer(BaseVectorizer):
     model_name: str
+    col_name: str
     device: str = Field(default_factory=detect_device)
 
     _metadata: Any = PrivateAttr()
@@ -227,7 +230,7 @@ class Vectorizer(BaseVectorizer):
             embed = agg[idx]
             self.chunk_sizes[embed.shape[0]] += 1
             regrouped.append(embed)
-        return {"embedding": regrouped}
+        return {self.col_name: regrouped}
 
     @jaxtyped(typechecker=beartype)
     def __call__(
