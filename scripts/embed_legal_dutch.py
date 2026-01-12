@@ -4,6 +4,7 @@ from datasets import load_from_disk
 from loguru import logger
 
 from vectormesh import VectorCache, Vectorizer
+import sys
 
 logger.remove()
 logger.add(sys.stderr, level="INFO")
