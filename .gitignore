@@ -31,3 +31,4 @@ htmlcov/
 Thumbs.db
 dev/*
 *.log
+.lycheecache
