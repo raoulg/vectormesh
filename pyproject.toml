@@ -33,6 +33,7 @@ build-backend = "hatchling.build"
 dev = [
     "jupyter>=1.1.1",
     "matplotlib>=3.10.8",
+    "notebooktester>=0.2.1",
     "pytest>=9.0.2",
     "pytest-cov>=7.0.0",
     "ruff>=0.14.10",
