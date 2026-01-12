@@ -24,7 +24,7 @@ def main():
         logger.error(f"Assets folder not found at: {assets.resolve()}")
         raise FileNotFoundError(f"Assets folder not found at: {assets.resolve()}")
     tag = next(assets.glob("aktes_*/"))
-    trainpath = tag / "train"
+    trainpath = tag / "test"
     if not trainpath.exists():
         logger.error(f"Train dataset not found at: {trainpath}")
         raise FileNotFoundError(f"Train dataset not found at: {trainpath}")
