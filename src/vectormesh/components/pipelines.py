@@ -42,4 +42,4 @@ class Parallel(nn.Module):
 
     @jaxtyped(typechecker=beartype)
     def forward(self, tensors):
-        return tuple(branch(tensors) for branch in self._all_branches)
+        return tuple(branch(t) for branch, t in zip(self._all_branches, tensors))
