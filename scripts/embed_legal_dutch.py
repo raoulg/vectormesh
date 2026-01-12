@@ -28,3 +28,6 @@ def main():
         dataset_tag=tag.name,
     )
     logger.success(f"Created vector cache at: {vectorcache.cache_dir}")
+
+if __name__ == "__main__":
+    main()
