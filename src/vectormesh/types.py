@@ -1,5 +1,7 @@
 from typing import Optional
 
+from pydantic import BaseModel, ConfigDict
+
 
 class VectorMeshError(Exception):
     """
@@ -20,3 +22,14 @@ class VectorMeshError(Exception):
         super().__init__(message)
         self.hint = hint
         self.fix = fix
+
+
+class VectorMeshComponent(BaseModel):
+    """
+    Base class for all VectorMesh components.
+
+    Enforces strict validation and immutable configuration using Pydantic.
+    All vectorizers, aggregators, and combinators inherit from this base.
+    """
+
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)

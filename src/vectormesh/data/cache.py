@@ -6,14 +6,14 @@ from typing import Generic, Optional, TypeVar, get_args, get_type_hints
 from datasets import Dataset, Features, Sequence, Value, load_from_disk
 from loguru import logger
 
-from vectormesh.types import VectorMeshError
+from vectormesh import VectorMeshComponent, VectorMeshError
 
 from .vectorizers import BaseVectorizer
 
 TVectorizer = TypeVar("TVectorizer", bound=BaseVectorizer)
 
 
-class VectorCache(Generic[TVectorizer]):
+class VectorCache(VectorMeshComponent, Generic[TVectorizer]):
     name: str
     cache_dir: Path
     dataset: Optional[Dataset] = None
