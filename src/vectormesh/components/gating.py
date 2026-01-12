@@ -11,7 +11,12 @@ from torch import Tensor
 
 
 class Skip(nn.Module):
-    """Residual skip connection: output = batchnorm(transform(x) + projection(x))"""
+    """Residual skip connection: output = batchnorm(transform(x) + projection(x))
+    - transform is the pipeline we want to apply to the input
+    - in_size is the dimensionality of the input; we need this for the layernorm
+    - projection is an optional pipeline, eg a Linear(in_size, out_size) if the
+    transform changes the dimensionality.
+    """
 
     transform: nn.Module
     projection: Optional[nn.Module]

@@ -14,7 +14,7 @@ class NeuralNet(nn.Module):
         self.activation = nn.GELU()
 
     @jaxtyped(typechecker=beartype)
-    def forward(self, x: Float[Tensor, "batch dim"]) -> Float[Tensor, "batch out_dim"]:
+    def forward(self, x: Float[Tensor, "batch dim1"]) -> Float[Tensor, "batch dim2"]:
         return self.fc2(self.activation(self.fc1(x)))
 
 
@@ -26,7 +26,7 @@ class Projection(nn.Module):
         self.proj = nn.Linear(in_size, out_size)
 
     @jaxtyped(typechecker=beartype)
-    def forward(self, x: Float[Tensor, "batch dim"]) -> Float[Tensor, "batch out_dim"]:
+    def forward(self, x: Float[Tensor, "batch dim1"]) -> Float[Tensor, "batch dim2"]:
         return self.proj(x)
 
 

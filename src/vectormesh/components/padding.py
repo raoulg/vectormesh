@@ -1,3 +1,5 @@
+from typing import Any
+
 import torch.nn.functional as F
 from beartype import beartype
 from jaxtyping import Float, jaxtyped
@@ -7,9 +9,7 @@ from torch.nn.utils.rnn import pad_sequence
 
 class DynamicPadding:
     @jaxtyped(typechecker=beartype)
-    def __call__(
-        self, embeddings: list[Float[Tensor, "_ dim"]]
-    ) -> Float[Tensor, "batch _ dim"]:
+    def __call__(self, embeddings: list[Any]) -> Float[Tensor, "batch _ dim"]:
         """Pad sequences to the maximum length in the batch."""
         return pad_sequence(
             embeddings,
@@ -23,7 +23,7 @@ class FixedPadding:
 
     @jaxtyped(typechecker=beartype)
     def __call__(
-        self, embeddings: list[Float[Tensor, "_ dim"]]
+        self, embeddings: list[Any]
     ) -> Float[Tensor, "batch {self.max_chunks} dim"]:
         padded = pad_sequence(embeddings, batch_first=True)
 
@@ -31,4 +31,5 @@ class FixedPadding:
         if current < self.max_chunks:
             return F.pad(padded, (0, 0, 0, self.max_chunks - current))
         else:
+            return padded[:, : self.max_chunks, :]
             return padded[:, : self.max_chunks, :]
