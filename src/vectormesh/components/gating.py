@@ -73,64 +73,58 @@ class Highway(nn.Module):
 
 
 class MoE(nn.Module):
-    """Mixture of Experts with top-k routing."""
+    """
+    See https://arxiv.org/abs/1701.06538 for paper
+    """
 
-    experts: nn.ModuleList
-    num_experts: int
-    top_k: int
-    router: nn.Linear
-    norm: nn.LayerNorm
-    out_size: int
-
-    def __init__(
-        self,
-        experts: list[nn.Module],
-        hidden_size: int,
-        out_size: int,
-        top_k: int,
-    ):
+    def __init__(self, experts, hidden_size, out_size, top_k, noisy_gating=True):
         super().__init__()
         self.experts = nn.ModuleList(experts)
-        self.num_experts = len(experts)
+        self.router = nn.Linear(hidden_size, len(experts))
+
+        self.w_noise = nn.Linear(hidden_size, len(experts))
+        self.noisy_gating = noisy_gating
         self.top_k = top_k
-        self.router = nn.Linear(hidden_size, self.num_experts)
-        self.norm = nn.LayerNorm(hidden_size)
+        self.num_experts = len(experts)
         self.out_size = out_size
 
-    @jaxtyped(typechecker=beartype)
-    def forward(
-        self, tensor: Float[Tensor, "batch dim"]
-    ) -> Float[Tensor, "batch out_dim"]:
-        # pre-norm (instead of post-norm) improves stability
-        tensor = self.norm(tensor)
-        top_k_probs, top_k_indices = self._select_top_k_experts(tensor)
+    def forward(self, x):
+        clean_logits = self.router(x)
 
-        output_shape = tensor.shape[:-1] + (self.out_size,)
-        output = torch.zeros(output_shape, device=tensor.device)
+        # self.training is automatically managed by .eval() and .train()
+        if self.noisy_gating and self.training:
+            raw_noise_stddev = self.w_noise(x)
+            noise_stddev = F.softplus(raw_noise_stddev) + 1e-2
+            noise = torch.randn_like(clean_logits) * noise_stddev
+            noisy_logits = clean_logits + noise
+        else:
+            noisy_logits = clean_logits
 
-        for i in range(self.top_k):
-            expert_idx = top_k_indices[:, i]  # (batch,)
-            expert_weights = top_k_probs[:, i].unsqueeze(-1)  # (batch, 1)
+        # We set non-top-k logits to -inf so Softmax drives them to absolute zero
+        top_logits, top_indices = noisy_logits.topk(self.top_k, dim=1)
+        full_logits = torch.full_like(noisy_logits, float("-inf"))
+        full_logits.scatter_(1, top_indices, top_logits)
 
-            # Route each batch item to its selected expert
-            for expert_id in range(self.num_experts):
-                mask = expert_idx == expert_id
-                if mask.any():
-                    expert_input = tensor[mask]
-                    expert_output = self.experts[expert_id](expert_input)
-                    output[mask] += expert_weights[mask] * expert_output
+        router_probs = F.softmax(full_logits, dim=1)
 
-        return output
+        final_output = torch.zeros(x.size(0), self.out_size, device=x.device)
 
-    def _select_top_k_experts(self, tensor: Tensor) -> tuple[Tensor, Tensor]:
-        """Select top-k experts and renormalize their probabilities.
-        eg
-          router_probs are [0.4, 0.3, 0.2, 0.1]
-          select topk=2 -> probs=[0.4, 0.3], indices=[0, 1]
-          renormalized -> probs=[0.57, 0.43]
-        """
-        router_logits = self.router(tensor)  # (batch, num_experts)
-        router_probs = F.softmax(router_logits, dim=-1)
-        top_k_probs, top_k_indices = torch.topk(router_probs, self.top_k, dim=-1)
-        top_k_probs = top_k_probs / top_k_probs.sum(dim=-1, keepdim=True)
-        return top_k_probs, top_k_indices
+        for i in range(self.num_experts):
+            mask = (top_indices == i).any(dim=1)
+
+            if mask.any():
+                expert_input = x[mask]
+                expert_output = self.experts[i](expert_input)
+
+                expert_weights = router_probs[mask, i].unsqueeze(-1)
+
+                final_output[mask] += expert_output * expert_weights
+
+        # TODO: the paper implements importance loss
+        # to encourage balanced expert usage
+        #
+        # importance = router_probs.sum(dim=0)
+        # imp_loss = (importance.std() / (importance.mean() + 1e-10)).pow(2)
+        # return final_output, imp_loss
+
+        return final_output
