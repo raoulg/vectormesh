@@ -1,6 +1,8 @@
 import sys
 from pathlib import Path
 
+from loguru import logger
+
 from vectormesh.data.dataset import build
 
 logger.remove()

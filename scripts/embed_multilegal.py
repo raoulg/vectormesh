@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 
-from datasets import load_from_disk
+from datasets import Dataset, load_from_disk
 from loguru import logger
 
 from vectormesh import VectorCache, Vectorizer
@@ -31,6 +31,7 @@ def main():
     logger.info(f"Loading data from: {trainpath}")
 
     train = load_from_disk(trainpath)
+    assert type(train) is Dataset
     model_name = "joelniklaus/legal-dutch-roberta-base"
     vectorizer = Vectorizer(model_name=model_name, col_name="multilegalpile")
 
