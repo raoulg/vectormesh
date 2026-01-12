@@ -13,6 +13,10 @@ from torch import Tensor
 class Skip(nn.Module):
     """Residual skip connection: output = batchnorm(transform(x) + projection(x))"""
 
+    transform: nn.Module
+    projection: Optional[nn.Module]
+    layernorm: nn.LayerNorm
+
     def __init__(
         self,
         transform: nn.Module,
@@ -21,7 +25,7 @@ class Skip(nn.Module):
     ):
         super().__init__()
         self.transform = transform
-        self.projection = projection
+        self.projection = projection  # type: ignore[unresolved-attribute]
         self.layernorm = nn.LayerNorm(in_size)
 
     @jaxtyped(typechecker=beartype)
@@ -66,6 +70,13 @@ class Highway(nn.Module):
 class MoE(nn.Module):
     """Mixture of Experts with top-k routing."""
 
+    experts: nn.ModuleList
+    num_experts: int
+    top_k: int
+    router: nn.Linear
+    norm: nn.LayerNorm
+    out_size: int
+
     def __init__(
         self,
         experts: list[nn.Module],
@@ -75,11 +86,11 @@ class MoE(nn.Module):
     ):
         super().__init__()
         self.experts = nn.ModuleList(experts)
-        self.num_experts = len(experts)
-        self.top_k = top_k
+        self.num_experts = len(experts)  # type: ignore[unresolved-attribute]
+        self.top_k = top_k  # type: ignore[unresolved-attribute]
         self.router = nn.Linear(hidden_size, self.num_experts)
         self.norm = nn.LayerNorm(hidden_size)
-        self.out_size = out_size
+        self.out_size = out_size  # type: ignore[unresolved-attribute]
 
     @jaxtyped(typechecker=beartype)
     def forward(

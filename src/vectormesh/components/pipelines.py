@@ -8,12 +8,15 @@ class Serial(nn.Module):
     Tensor checking happens via jaxtyping decorators on each component.
     """
 
+    components: nn.ModuleList
+    _all_components: list
+
     def __init__(self, components: list):
         super().__init__()
         self.components = nn.ModuleList(
             [c for c in components if isinstance(c, nn.Module)]
         )
-        self._all_components = components
+        self._all_components = components  # type: ignore[unresolved-attribute]
 
     @jaxtyped(typechecker=beartype)
     def forward(self, tensors):
@@ -29,10 +32,13 @@ class Parallel(nn.Module):
     All branches receive the same input.
     """
 
+    branches: nn.ModuleList
+    _all_branches: list
+
     def __init__(self, branches):
         super().__init__()
         self.branches = nn.ModuleList([b for b in branches if isinstance(b, nn.Module)])
-        self._all_branches = branches
+        self._all_branches = branches  # type: ignore[unresolved-attribute]
 
     @jaxtyped(typechecker=beartype)
     def forward(self, tensors):
