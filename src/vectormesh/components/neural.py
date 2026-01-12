@@ -4,7 +4,7 @@ from jaxtyping import Float, jaxtyped
 from torch import Tensor
 
 
-class MLP(nn.Module):
+class NeuralNet(nn.Module):
     """Two-layer feedforward network with GELU activation."""
 
     def __init__(self, hidden_size: int, out_size: int):
