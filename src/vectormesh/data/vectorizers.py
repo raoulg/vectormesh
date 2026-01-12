@@ -14,7 +14,7 @@ from pydantic import Field, PrivateAttr, model_validator
 from torch import Tensor
 from transformers import AutoConfig, AutoModel, AutoTokenizer
 
-from vectormesh import VectorMeshComponent, VectorMeshError
+from vectormesh.types import VectorMeshComponent, VectorMeshError
 
 
 def detect_device() -> str:
@@ -32,6 +32,9 @@ class BaseVectorizer(ABC, VectorMeshComponent):
 
     All vectorizers must:
     - Have a model_name, device, and metadata
+    - model_name is used in the VectorCache to identify the model used for a vectorizer
+    - col_name is used to store the output of the vectorizer in the dataset
+    - device is for hardware acceleration, if applicable
     - Implement __call__ that returns dict[str, list[Float[Tensor, "..."]]]
     - The exact tensor dimensionality can vary by implementation
     """

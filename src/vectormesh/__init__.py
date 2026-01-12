@@ -16,8 +16,8 @@ from vectormesh.types import VectorMeshComponent, VectorMeshError
 __version__ = version("vectormesh")
 
 __all__ = [
-    "VectorMeshError",
     "VectorMeshComponent",
+    "VectorMeshError",
     "VectorCache",
     "LabelEncoder",
     "build",

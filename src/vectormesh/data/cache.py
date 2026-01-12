@@ -6,7 +6,7 @@ from typing import Generic, Optional, TypeVar, get_args, get_type_hints
 from datasets import Dataset, Features, Sequence, Value, load_from_disk
 from loguru import logger
 
-from vectormesh import VectorMeshComponent, VectorMeshError
+from vectormesh.types import VectorMeshComponent, VectorMeshError
 
 from .vectorizers import BaseVectorizer
 
@@ -31,10 +31,32 @@ class VectorCache(VectorMeshComponent, Generic[TVectorizer]):
         map_batch: Optional[int] = 32,
         column_name: Optional[str] = None,
     ) -> "VectorCache[TVectorizer]":
+        """
+        Args:
+            cache_dir (Path): the location to store the cache
+            vectorizer (TVectorizer): the vectorizer to apply to the dataset to vectorize the text
+            dataset (Dataset): the dataset that provides the text to vectorize
+            dataset_tag (Optional[str], optional): a tag used to identify preprocessing and versions.
+                This will be used to create a new cache folder cache_dire/dataset_tag_{column_name} inside cache_dir.
+                Will look for existing metadata.json in cache_dir/dataset_tag to extend
+            features (Optional[Features], optional): the features of the provided dataset. Will be handled automatically if not provided. Defaults to None.
+            vector_batch (Optional[int], optional): the batchsize of the vectorizer (eg the huggingface model). Defaults to 32.
+            map_batch (Optional[int], optional): The batchsize for the mapping over the dataset. Defaults to 32.
+            column_name (Optional[str], optional): how to store the output of the vectorizer in the dataset. If not provided, will use vectorizer.col_name. Defaults to None.
+
+        Returns:
+            VectorCache[TVectorizer]
+        """
         from vectormesh import __version__
 
         vtype = vectorizer.__class__.__name__
-        embedding_column = vectorizer.col_name or column_name
+        if column_name is None:
+            if not vectorizer.col_name:
+                raise VectorMeshError(
+                    "column_name must be provided if vectorizer.col_name is not set."
+                )
+            column_name = vectorizer.col_name
+        logger.info(f"Using embedding column: {column_name}")
 
         tensord = cls.get_dtensor(vectorizer)
 
@@ -43,16 +65,12 @@ class VectorCache(VectorMeshComponent, Generic[TVectorizer]):
             logger.info(f"Created cache directory at {cache_dir}")
 
         if features is None:
-            features = cls.get_features(
-                dataset, tensord, embedding_column=embedding_column
-            )
+            features = cls.get_features(dataset, tensord, embedding_column=column_name)
 
-        cachetag = f"{dataset_tag}_{tensord}d_{vectorizer.get_hidden_size}"
+        cachetag = f"{dataset_tag}_{column_name}"
         filepath = cache_dir / cachetag
         metadata_path = filepath / "metadata.json"
-        logger.info(
-            f"Starting cache with\n tag {cachetag}\n at {filepath}\n features {features}"
-        )
+        logger.info(f"Starting {cachetag}")
 
         try:
             new_dataset = dataset.map(
@@ -61,23 +79,27 @@ class VectorCache(VectorMeshComponent, Generic[TVectorizer]):
                 batch_size=map_batch,  # Number of documents per batch
                 features=features,
             )
-            logger.success("Vectorization complete.")
 
             new_dataset.save_to_disk(filepath)
             metadata = {
-                "vectormesh_version": __version__,
-                "model_tag": vectorizer.model_name,
-                "vectorizer_type": vtype,
-                "tensordtype": cls.get_dtensor(vectorizer),
-                "hidden_size": vectorizer.get_hidden_size,
-                "context_size": vectorizer.get_context_size,
+                f"{column_name}": {
+                    "vectormesh_version": __version__,
+                    "model_tag": vectorizer.model_name,
+                    "vectorizer_type": vtype,
+                    "tensordtype": cls.get_dtensor(vectorizer),
+                    "hidden_size": vectorizer.get_hidden_size,
+                    "context_size": vectorizer.get_context_size,
+                    "chunk_sizes": getattr(vectorizer, "chunk_sizes", None),
+                },
                 "features": list(features.keys()),
-                "chunk_sizes": dict(vectorizer.chunk_sizes),
                 "created_at": datetime.now().isoformat(),
                 "num_observations": len(new_dataset),
             }
+            # check for existing metadata to update
+            metadata = cls.update_metadata(cache_dir / dataset_tag, metadata)
             with open(metadata_path, "w") as f:
                 json.dump(metadata, f, indent=2)
+            logger.success("Vectorization complete.")
 
         except Exception as e:
             if filepath.exists():
@@ -97,14 +119,14 @@ class VectorCache(VectorMeshComponent, Generic[TVectorizer]):
 
     @classmethod
     def load(cls, path: Path) -> "Cache[TVectorizer]":
-        metadata_path = path / "metadata.json"
         if not path.exists():
-            raise VectorMeshError(f"Directory {path} does not exist.")
-        if not metadata_path.exists():
-            raise VectorMeshError(f"Metadata file {metadata_path} does not exist.")
+            raise VectorMeshError(f"Cache path {path} does not exist.")
+        if not path.is_dir():
+            raise VectorMeshError(f"Cache path {path} is expected to be a directory.")
 
         dataset = load_from_disk(path)
         dataset.set_format(type="torch")
+        metadata_path = path / "metadata.json"
         with open(metadata_path, "r") as f:
             metadata = json.load(f)
 
@@ -115,6 +137,18 @@ class VectorCache(VectorMeshComponent, Generic[TVectorizer]):
             dataset=dataset,
             metadata=metadata,
         )
+
+    @staticmethod
+    def update_metadata(path: Path, new_metadata: dict) -> dict:
+        metadata_path = path / "metadata.json"
+        if not metadata_path.exists():
+            logger.info(f"No existing metadata found at {path}, creating new metadata.")
+            return new_metadata
+        logger.info(f"Updating existing metadata found at {path}.")
+        with open(metadata_path, "r") as f:
+            metadata = json.load(f)
+        metadata.update(new_metadata)
+        return metadata
 
     @staticmethod
     def get_features(dataset: Dataset, tensord: int, embedding_column: str) -> Features:

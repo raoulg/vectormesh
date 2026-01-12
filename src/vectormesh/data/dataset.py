@@ -168,7 +168,7 @@ def build(
         trainsplit=trainsplit,
         testvalsplit=testvalsplit,
     )
-    datasettag = f"theshold_{threshold}_{datasets['train']._fingerprint}"
+    datasettag = f"theshold_{threshold}_{datasets['train']._fingerprint[:6]}"
     datadir = output_dir / Path(f"aktes_{datasettag}")
     datadir = datadir.resolve()
     logger.info(f"Saving processed data to {datadir}")
