@@ -155,10 +155,15 @@ class Vectorizer(BaseVectorizer):
                 hint="Check that the model ID is correct and supports sentence-transformers.",
                 fix=f"See: `BaseVectorizer(model_name='{self.model_name}`._metadata for max_poistion_embeddings",
             )
+        pad_token_id = getattr(self._metadata, "pad_token_id", 1)
+        safe_max_length = max_length - (pad_token_id + 1)
+        logger.info(
+            f"updated context {max_length} to {safe_max_length} to account for padding"
+        )
         tokens = self._tokenizer(
             text,
             truncation=True,
-            max_length=max_length,
+            max_length=safe_max_length,
             stride=self._stride,
             return_overflowing_tokens=True,
             return_tensors="pt",
