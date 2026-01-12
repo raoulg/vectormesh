@@ -37,7 +37,7 @@ def main():
     vectorizer = Vectorizer(model_name=model_name, col_name="legal_dutch")
 
     vectorcache = VectorCache.create(
-        cache_dir=Path("../artefacts"),
+        cache_dir=Path("artefacts"),
         vectorizer=vectorizer,
         dataset=train,
         dataset_tag=tag.name,
