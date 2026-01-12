@@ -174,7 +174,7 @@ def build(
     logger.info(f"Saving processed data to {datadir}")
     if not datadir.exists():
         datadir.mkdir(parents=True, exist_ok=True)
-    le = LabelEncoder(codes)
+    le = LabelEncoder(list(codes))
     le_file = Path("labelencoder.json")
     le.save(datadir / le_file)
     for split in ["train", "test", "valid"]:

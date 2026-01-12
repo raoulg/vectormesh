@@ -3,7 +3,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Generic, Optional, TypeVar, get_args, get_type_hints
 
-from datasets import Dataset, Features, Sequence, Value, load_from_disk
+from datasets import Dataset, DatasetDict, Features, Sequence, Value, load_from_disk
 from loguru import logger
 
 from vectormesh.types import VectorMeshComponent, VectorMeshError
@@ -25,7 +25,7 @@ class VectorCache(VectorMeshComponent, Generic[TVectorizer]):
         cache_dir: Path,
         vectorizer: TVectorizer,
         dataset: Dataset,
-        dataset_tag: Optional[str] = "default",
+        dataset_tag: str = "default",
         features: Optional[Features] = None,
         vector_batch: Optional[int] = 32,
         map_batch: Optional[int] = 32,
@@ -118,13 +118,19 @@ class VectorCache(VectorMeshComponent, Generic[TVectorizer]):
         )
 
     @classmethod
-    def load(cls, path: Path) -> "Cache[TVectorizer]":
+    def load(cls, path: Path) -> "VectorCache[TVectorizer]":
         if not path.exists():
             raise VectorMeshError(f"Cache path {path} does not exist.")
         if not path.is_dir():
             raise VectorMeshError(f"Cache path {path} is expected to be a directory.")
 
-        dataset = load_from_disk(path)
+        loaded_data = load_from_disk(path)
+        if isinstance(loaded_data, DatasetDict):
+            raise VectorMeshError(
+                f"Expected Dataset but got DatasetDict at {path}. "
+                "Please load a specific split instead."
+            )
+        dataset: Dataset = loaded_data
         dataset.set_format(type="torch")
         metadata_path = path / "metadata.json"
         with open(metadata_path, "r") as f:
