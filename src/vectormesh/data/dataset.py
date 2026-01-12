@@ -1,12 +1,64 @@
 import json
 from collections import Counter
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import Callable, Dict, List, Set, Tuple
 
 import torch
 from datasets import Dataset
 from loguru import logger
+from pydantic import BaseModel
 from tqdm import tqdm
+
+
+class OneHot(BaseModel):
+    """
+    Turns a sparse integer label into a one-hot encoded vector.
+    """
+
+    num_classes: int
+    label_col: str
+    target_col: str
+
+    def __call__(self, observation):
+        vec = torch.zeros(self.num_classes, dtype=torch.float32)
+        vec[observation[self.label_col]] = 1.0
+        return {self.target_col: vec}
+
+
+class Collate(BaseModel):
+    """
+    processes a batch of Dataset items into padded tensors
+    """
+
+    embedding_col: str
+    target_col: str
+    padder: Callable
+
+    def __call__(self, batch):
+        embeddings = [item[self.embedding_col] for item in batch]
+        X = self.padder(embeddings)
+        y = torch.stack([item[self.target_col] for item in batch]).float()
+        return X, y
+
+
+class CollateParallel(BaseModel):
+    """
+    processes a batch of Dataset items into padded tensors
+    for two separate inputs.
+    """
+
+    vec1_col: str
+    vec2_col: str
+    target_col: str
+    padder: Callable
+
+    def __call__(self, batch):
+        embeddings1 = [item[self.vec1_col] for item in batch]
+        embeddings2 = [item[self.vec2_col] for item in batch]
+        X1 = self.padder(embeddings1)  # this one needs to be padded
+        X2 = torch.stack(embeddings2).float()  # this one doesnt
+        y = torch.stack([item[self.target_col] for item in batch]).float()
+        return (X1, X2), y
 
 
 class LabelEncoder:
