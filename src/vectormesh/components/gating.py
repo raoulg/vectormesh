@@ -25,7 +25,7 @@ class Skip(nn.Module):
     ):
         super().__init__()
         self.transform = transform
-        self.projection = projection  # type: ignore[unresolved-attribute]
+        self.projection = projection
         self.layernorm = nn.LayerNorm(in_size)
 
     @jaxtyped(typechecker=beartype)
@@ -86,11 +86,11 @@ class MoE(nn.Module):
     ):
         super().__init__()
         self.experts = nn.ModuleList(experts)
-        self.num_experts = len(experts)  # type: ignore[unresolved-attribute]
-        self.top_k = top_k  # type: ignore[unresolved-attribute]
+        self.num_experts = len(experts)
+        self.top_k = top_k
         self.router = nn.Linear(hidden_size, self.num_experts)
         self.norm = nn.LayerNorm(hidden_size)
-        self.out_size = out_size  # type: ignore[unresolved-attribute]
+        self.out_size = out_size
 
     @jaxtyped(typechecker=beartype)
     def forward(

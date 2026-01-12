@@ -16,7 +16,7 @@ class Serial(nn.Module):
         self.components = nn.ModuleList(
             [c for c in components if isinstance(c, nn.Module)]
         )
-        self._all_components = components  # type: ignore[unresolved-attribute]
+        self._all_components = components
 
     @jaxtyped(typechecker=beartype)
     def forward(self, tensors):
@@ -38,7 +38,7 @@ class Parallel(nn.Module):
     def __init__(self, branches):
         super().__init__()
         self.branches = nn.ModuleList([b for b in branches if isinstance(b, nn.Module)])
-        self._all_branches = branches  # type: ignore[unresolved-attribute]
+        self._all_branches = branches
 
     @jaxtyped(typechecker=beartype)
     def forward(self, tensors):
