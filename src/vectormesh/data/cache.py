@@ -67,7 +67,8 @@ class VectorCache(VectorMeshComponent, Generic[TVectorizer]):
         if features is None:
             features = cls.get_features(dataset, tensord, embedding_column=column_name)
 
-        cachetag = f"{dataset_tag}_{column_name}"
+        now = datetime.now().strftime("%Y%m%d%H%M%S")
+        cachetag = f"{now}_{dataset_tag}_{column_name}"
         filepath = cache_dir / cachetag
         metadata_path = filepath / "metadata.json"
         logger.info(f"Starting {cachetag}")
@@ -202,4 +203,6 @@ class VectorCache(VectorMeshComponent, Generic[TVectorizer]):
             raise AttributeError(
                 f"'{type(self).__name__}' object has no attribute '{name}'"
             )
-        return getattr(self._ensure_dataset_loaded(), name)
+
+        attribute = getattr(self._ensure_dataset_loaded(), name)
+        return attribute
