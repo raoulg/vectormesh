@@ -157,9 +157,6 @@ class Vectorizer(BaseVectorizer):
             )
         pad_token_id = getattr(self._metadata, "pad_token_id", 1)
         safe_max_length = max_length - (pad_token_id + 1)
-        logger.info(
-            f"updated context {max_length} to {safe_max_length} to account for padding"
-        )
         tokens = self._tokenizer(
             text,
             truncation=True,
