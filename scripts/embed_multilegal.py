@@ -13,12 +13,11 @@ logger.add("logs/embed_legal_dutch.log", rotation="10 MB", level="DEBUG")
 
 def main():
     """
-    Gerwin/legal-bert-dutch-english:
+    joelniklaus/legal-dutch-roberta-base:
 
-        Trained on 184,000 legal documents including regulations, decisions, directives, and parliamentary questions in both Dutch and English PromptLayer
-        Built on top of mBERT with 60,000 training steps PromptLayer
-        Tested on a proprietary dataset of 8,000 long legal documents (2,000 Dutch & 6,000 English) with 30 classes Hugging Face
-        Also evaluated on Multi-EURLEX task
+        Trained on MultiLegalPile, a 689GB multilingual corpus covering 24 languages from 17 jurisdictions Hugging FaceHugging Face
+        The complete dataset consists of four subsets: Native Multi Legal Pile (112GB), Eurlex Resources (179GB), Legal MC4 (106GB), and Pile of Law (292GB) Hugging Face
+        The Dutch-specific model was trained on the Dutch language subset of this massive corpus
     """
     assets = Path("assets")
     if not assets.exists():
@@ -32,8 +31,8 @@ def main():
     logger.info(f"Loading data from: {trainpath}")
 
     train = load_from_disk(trainpath)
-    model_name = "Gerwin/legal-bert-dutch-english"
-    vectorizer = Vectorizer(model_name=model_name, col_name="legal_dutch")
+    model_name = "joelniklaus/legal-dutch-roberta-base"
+    vectorizer = Vectorizer(model_name=model_name, col_name="multilegalpile")
 
     vectorcache = VectorCache.create(
         cache_dir=Path("../artefacts"),
