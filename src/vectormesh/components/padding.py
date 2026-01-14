@@ -32,4 +32,3 @@ class FixedPadding:
             return F.pad(padded, (0, 0, 0, self.max_chunks - current))
         else:
             return padded[:, : self.max_chunks, :]
-            return padded[:, : self.max_chunks, :]
