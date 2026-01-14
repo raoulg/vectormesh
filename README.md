@@ -15,10 +15,7 @@ A PyTorch-based framework for efficient vector embedding management and multi-mo
 
 ```bash
 # Using uv (recommended)
-uv pip install -e .
-
-# Using pip
-pip install -e .
+uv sync
 ```
 
 ## Understanding Type Checking with Jaxtyping and Beartype
@@ -37,7 +34,7 @@ def forward(
     return embeddings.mean(dim=1)
 ```
 
-This tells you immediately:
+This tells you immediately that this function:
 - **Input**: 3D tensor with shape (batch_size, num_chunks, embedding_dim)
 - **Output**: 2D tensor with shape (batch_size, embedding_dim)
 
@@ -82,13 +79,13 @@ violates type hint Float[Tensor, "batch dim"], as 3D tensor != 2D tensor
 This means:
 - You're passing the wrong tensor shape to a function
 - Check the function signature to see what shape it expects
-- You probably need to add an aggregator (e.g., `MeanAggregator`) or change your pipeline
+- In this situation, you probably need to add an aggregator (e.g., `MeanAggregator`) to turn 3D -> 2D
 
 **Pro tip**: Read the type hints in error messages carefully - they tell you exactly what went wrong!
 
 ## Quick Start
 
-**Note**: You will receive pre-built datasets from your instructor. These datasets were created using the `build` function (see [Dataset Creation](#dataset-creation) section below), which splits raw data into train/test/validation sets and filters labels based on frequency thresholds.
+**Note**: You will receive a chached vector-datasets from your instructor. These datasets were created using the `build` function (see [Dataset Creation](#dataset-creation) section below), which splits raw data into train/test/validation sets and filters labels based on frequency thresholds.
 
 ### 1. Creating Vector Caches
 
@@ -98,7 +95,7 @@ from datasets import load_from_disk
 from vectormesh import Vectorizer, VectorCache
 
 # Load your dataset
-dataset = load_from_disk("assets/dataset/train")
+dataset = load_from_disk("assets/train")
 
 # Create a vectorizer with a Hugging Face model
 vectorizer = Vectorizer(
@@ -156,15 +153,15 @@ from vectormesh.data import Collate, OneHot
 # Load cache
 cache = VectorCache.load(path=Path("artefacts/my_dataset"))
 
-# Prepare data
+# Prepare data with one-hot labels
 onehot = OneHot(num_classes=32, label_col="labels", target_col="onehot")
 train_data = cache.select(range(1000)).map(onehot)
 
-# Create collate function with padding
+# Create collate function with padding for the Dataloader
 collate_fn = Collate(
-    embedding_col="legal_dutch",
-    target_col="onehot",
-    padder=FixedPadding(max_chunks=30)
+    embedding_col="legal_dutch",  # pad these embeddings into (batch, chunks, dim)
+    target_col="onehot", # return the one-hot encodes labels
+    padder=FixedPadding(max_chunks=30)  # we use a fixed padding
 )
 
 # Create dataloader
@@ -184,7 +181,7 @@ pipeline = Serial([
 # Train
 trainer = Trainer(
     model=pipeline,
-    settings=TrainerSettings(epochs=10, logdir=Path("logs")),
+    settings=settings,  # see notebooks for how to make actual settings
     loss_fn=torch.nn.BCEWithLogitsLoss(),
     optimizer=torch.optim.Adam,
     traindataloader=trainloader,
@@ -209,11 +206,13 @@ from vectormesh.data import CollateParallel
 # Create parallel pipeline
 parallel = Parallel([
     # Branch 1: Process 3D embeddings
+    # (batch, chunks, 768) -> (batch, 32)
     Serial([
         MeanAggregator(),
         NeuralNet(hidden_size=768, out_size=32)
     ]),
     # Branch 2: Process regex features
+    # (batch, 123) -> (batch, 32)
     Serial([
         NeuralNet(hidden_size=123, out_size=32)
     ])
@@ -221,9 +220,9 @@ parallel = Parallel([
 
 # Combine outputs
 pipeline = Serial([
-    parallel,           # (X1, X2) -> (Y1, Y2)
-    Concatenate2D(),    # (Y1, Y2) -> (batch, 64)
-    NeuralNet(hidden_size=64, out_size=32)
+    parallel,           # ((batch chunks 768) (batch 123)) -> ((batch 32) (batch 32))
+    Concatenate2D(),    # ((batch 32) (batch 32)) -> (batch, 64)
+    NeuralNet(hidden_size=64, out_size=32)  # (batch, 64) -> (batch, 32)
 ])
 
 # Use CollateParallel for multiple inputs
@@ -237,12 +236,14 @@ collate_fn = CollateParallel(
 
 ### Mixture of Experts (MoE)
 
+See the paper "outrageously large neural networks" in the `references` folder for more details on MoE architectures.
+
 ```python
 from vectormesh.components import MeanAggregator, NeuralNet, Serial
 from vectormesh.components.gating import MoE
 
-# Create MoE with 4 experts, select top 2
 moe = MoE(
+    # Create MoE with 4 experts
     experts=[
         NeuralNet(hidden_size=768, out_size=32),
         NeuralNet(hidden_size=768, out_size=32),
@@ -251,7 +252,7 @@ moe = MoE(
     ],
     hidden_size=768,
     out_size=32,
-    top_k=2
+    top_k=2 # but we only use the selected top 2 experts per sample
 )
 
 pipeline = Serial([MeanAggregator(), moe])
@@ -264,12 +265,14 @@ from vectormesh.components import AttentionAggregator, RNNAggregator
 
 # Use attention-based aggregation (learnable)
 pipeline = Serial([
+    # (batch chunks dim) -> (batch dim)
     AttentionAggregator(hidden_size=768),
     NeuralNet(hidden_size=768, out_size=32)
 ])
 
 # Or use RNN-based aggregation
 pipeline = Serial([
+    # (batch chunks dim) -> (batch dim)
     RNNAggregator(hidden_size=768),
     NeuralNet(hidden_size=768, out_size=32)
 ])
@@ -296,6 +299,18 @@ pipeline = Serial([
     NeuralNet(hidden_size=768, out_size=32)
 ])
 
+# put a gate in the skip connection
+pipeline = Serial([
+    Projection(in_size=64, out_size=32),
+    Skip(
+        transform=Serial[
+            NeuralNet(hidden_size=32, out_size=32),
+            Gate(hidden_size=32),
+        ],
+        in_size=32
+    )
+])
+
 # Highway network
 pipeline = Serial([
     MeanAggregator(),
@@ -306,6 +321,8 @@ pipeline = Serial([
     NeuralNet(hidden_size=768, out_size=32)
 ])
 ```
+
+For more details on the Highway Network, see the "Highway Networks" paper in the `references` folder.
 
 ## Components
 
@@ -405,22 +422,6 @@ The `notebooks/` directory contains detailed tutorials:
    - MoE architecture and training
    - Expert selection and gating
 
-## Development
-
-```bash
-# Install development dependencies
-uv pip install -e ".[dev]"
-
-# Run tests
-pytest
-
-# Run tests with coverage
-pytest --cov=src/vectormesh --cov-report=html
-
-# Format code
-ruff check --fix .
-```
-
 ## Project Structure
 
 ```
@@ -454,11 +455,3 @@ vectormesh/
 - mltrainer >= 0.2.7
 
 See `pyproject.toml` for complete dependencies.
-
-## License
-
-See LICENSE file for details.
-
-## Author
-
-Raoul Grouls (Raoul.Grouls@han.nl)
