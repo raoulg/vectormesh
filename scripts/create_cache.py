@@ -48,4 +48,5 @@ def cache_for_model(model_name: str):
 if __name__ == "__main__":
     models = ["Gerwin/legal-bert-dutch-english", "joelniklaus/legal-dutch-roberta-base"]
     for model in models:
+        logger.info(f"Creating cache for model: {model}")
         cache_for_model(model)
