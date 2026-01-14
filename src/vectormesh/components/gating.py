@@ -36,11 +36,11 @@ class Skip(BaseComponent):
         self.layernorm = nn.LayerNorm(in_size)
 
     @jaxtyped(typechecker=beartype)
-    def forward(self, x: Float[Tensor, "..."]) -> Float[Tensor, "..."]:
+    def forward(self, tensors: Float[Tensor, "..."]) -> Float[Tensor, "..."]:
         # pre-norm (instead of post-norm) improves stability
-        x = self.layernorm(x)
-        residual = self.projection(x) if self.projection else x
-        transformed = self.transform(x)
+        tensors = self.layernorm(tensors)
+        residual = self.projection(tensors) if self.projection else tensors
+        transformed = self.transform(tensors)
         return transformed + residual
 
 
@@ -52,8 +52,10 @@ class Gate(BaseComponent):
         self.project = nn.Linear(hidden_size, hidden_size)
 
     @jaxtyped(typechecker=beartype)
-    def forward(self, x: Float[Tensor, "batch dim"]) -> Float[Tensor, "batch dim"]:
-        return F.sigmoid(self.project(x)) * x
+    def forward(
+        self, tensors: Float[Tensor, "batch dim"]
+    ) -> Float[Tensor, "batch dim"]:
+        return F.sigmoid(self.project(tensors)) * tensors
 
 
 class Highway(BaseComponent):
@@ -66,12 +68,14 @@ class Highway(BaseComponent):
         self.norm = nn.LayerNorm(hidden_size)
 
     @jaxtyped(typechecker=beartype)
-    def forward(self, x: Float[Tensor, "batch dim"]) -> Float[Tensor, "batch dim"]:
+    def forward(
+        self, tensors: Float[Tensor, "batch dim"]
+    ) -> Float[Tensor, "batch dim"]:
         # pre-norm (instead of post-norm) improves stability
-        x = self.norm(x)
-        gate = F.sigmoid(self.project(x))
-        transformed = self.transform(x)
-        return gate * transformed + (1 - gate) * x
+        tensors = self.norm(tensors)
+        gate = F.sigmoid(self.project(tensors))
+        transformed = self.transform(tensors)
+        return gate * transformed + (1 - gate) * tensors
 
 
 class MoE(BaseComponent):
@@ -90,12 +94,12 @@ class MoE(BaseComponent):
         self.num_experts = len(experts)
         self.out_size = out_size
 
-    def forward(self, x):
-        clean_logits = self.router(x)
+    def forward(self, tensors):
+        clean_logits = self.router(tensors)
 
         # self.training is automatically managed by .eval() and .train()
         if self.noisy_gating and self.training:
-            raw_noise_stddev = self.w_noise(x)
+            raw_noise_stddev = self.w_noise(tensors)
             noise_stddev = F.softplus(raw_noise_stddev) + 1e-2
             noise = torch.randn_like(clean_logits) * noise_stddev
             noisy_logits = clean_logits + noise
@@ -109,13 +113,15 @@ class MoE(BaseComponent):
 
         router_probs = F.softmax(full_logits, dim=1)
 
-        final_output = torch.zeros(x.size(0), self.out_size, device=x.device)
+        final_output = torch.zeros(
+            tensors.size(0), self.out_size, device=tensors.device
+        )
 
         for i in range(self.num_experts):
             mask = (top_indices == i).any(dim=1)
 
             if mask.any():
-                expert_input = x[mask]
+                expert_input = tensors[mask]
                 expert_output = self.experts[i](expert_input)
 
                 expert_weights = router_probs[mask, i].unsqueeze(-1)

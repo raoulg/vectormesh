@@ -27,7 +27,9 @@ class Serial(nn.Module):
 
 class Parallel(nn.Module):
     """Parallel composition - runs branches independently and returns tuple.
-    All branches receive the same input.
+    All branches receive the same input of Tuple[Tensor, ...] and return Tuple[Tensor, ...].
+
+    The number of branches must match the number of tensors in the input tuple.
     """
 
     branches: nn.ModuleList

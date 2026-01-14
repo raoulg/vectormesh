@@ -20,7 +20,7 @@ class BaseAggregator(BaseComponent):
     @abstractmethod
     @jaxtyped(typechecker=beartype)
     def forward(
-        self, embeddings: Float[Tensor, "batch _ dim"]
+        self, tensors: Float[Tensor, "batch _ dim"]
     ) -> Float[Tensor, "batch dim"]:
         """Aggregate from (batch, chunks, dim) to (batch, dim)."""
         ...
@@ -33,10 +33,10 @@ class MeanAggregator(BaseAggregator):
 
     @jaxtyped(typechecker=beartype)
     def forward(
-        self, embeddings: Float[Tensor, "batch _ dim"]
+        self, tensors: Float[Tensor, "batch _ dim"]
     ) -> Float[Tensor, "batch dim"]:
         """Mean over chunks dimension."""
-        return embeddings.mean(dim=1)
+        return tensors.mean(dim=1)
 
 
 class AttentionAggregator(BaseAggregator):
@@ -52,11 +52,11 @@ class AttentionAggregator(BaseAggregator):
 
     @jaxtyped(typechecker=beartype)
     def forward(
-        self, embeddings: Float[Tensor, "batch _ dim"]
+        self, tensors: Float[Tensor, "batch _ dim"]
     ) -> Float[Tensor, "batch dim"]:
         # attention_weights: (batch, _, 1)
-        attention_weights = torch.softmax(self.attention(embeddings), dim=1)
-        return (embeddings * attention_weights).sum(dim=1)
+        attention_weights = torch.softmax(self.attention(tensors), dim=1)
+        return (tensors * attention_weights).sum(dim=1)
 
 
 class RNNAggregator(BaseAggregator):
@@ -73,8 +73,7 @@ class RNNAggregator(BaseAggregator):
 
     @jaxtyped(typechecker=beartype)
     def forward(
-        self, embeddings: Float[Tensor, "batch _ dim"]
+        self, tensors: Float[Tensor, "batch _ dim"]
     ) -> Float[Tensor, "batch dim"]:
-        output, _ = self.rnn(embeddings)
-        return output[:, -1, :]
+        output, _ = self.rnn(tensors)
         return output[:, -1, :]

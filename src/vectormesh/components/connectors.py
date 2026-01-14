@@ -36,5 +36,3 @@ class Stack2D(BaseComponent):
         self, tensors: tuple[Float[Tensor, "batch dim1"], ...]
     ) -> Float[Tensor, "batch nstack dim1"]:
         return torch.stack(tensors, dim=1)
-        return torch.stack(tensors, dim=1)
-        return torch.stack(tensors, dim=1)

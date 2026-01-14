@@ -19,9 +19,9 @@ class NeuralNet(BaseComponent):
 
     @jaxtyped(typechecker=beartype)
     def forward(
-        self, x: Float[Tensor, "batch {self.hidden_size}"]
+        self, tensors: Float[Tensor, "batch {self.hidden_size}"]
     ) -> Float[Tensor, "batch {self.out_size}"]:
-        return self.fc2(self.activation(self.fc1(x)))
+        return self.fc2(self.activation(self.fc1(tensors)))
 
 
 class Projection(BaseComponent):
@@ -35,9 +35,9 @@ class Projection(BaseComponent):
 
     @jaxtyped(typechecker=beartype)
     def forward(
-        self, x: Float[Tensor, "batch {self.hidden_size}"]
+        self, tensors: Float[Tensor, "batch {self.hidden_size}"]
     ) -> Float[Tensor, "batch {self.out_size}"]:
-        return self.proj(x)
+        return self.proj(tensors)
 
 
 class Attention(nn.Module):
@@ -55,8 +55,8 @@ class Attention(nn.Module):
 
     @jaxtyped(typechecker=beartype)
     def forward(
-        self, x: Float[Tensor, "batch seq {self.hidden_size}"]
+        self, tensors: Float[Tensor, "batch seq {self.hidden_size}"]
     ) -> Float[Tensor, "batch seq {self.hidden_size}"]:
-        # Self-attention: query, key, value all come from x
-        attn_output, _ = self.attn(x, x, x, need_weights=False)
+        # Self-attention: query, key, value all come from tensors
+        attn_output, _ = self.attn(tensors, tensors, tensors, need_weights=False)
         return attn_output

@@ -9,10 +9,10 @@ from torch.nn.utils.rnn import pad_sequence
 
 class DynamicPadding:
     @jaxtyped(typechecker=beartype)
-    def __call__(self, embeddings: list[Any]) -> Float[Tensor, "batch _ dim"]:
+    def __call__(self, tensors: list[Any]) -> Float[Tensor, "batch _ dim"]:
         """Pad sequences to the maximum length in the batch."""
         return pad_sequence(
-            embeddings,
+            tensors,
             batch_first=True,
         )
 
@@ -23,9 +23,9 @@ class FixedPadding:
 
     @jaxtyped(typechecker=beartype)
     def __call__(
-        self, embeddings: list[Any]
+        self, tensors: list[Any]
     ) -> Float[Tensor, "batch {self.max_chunks} dim"]:
-        padded = pad_sequence(embeddings, batch_first=True)
+        padded = pad_sequence(tensors, batch_first=True)
 
         current = padded.shape[1]
         if current < self.max_chunks:
