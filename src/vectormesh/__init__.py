@@ -11,13 +11,10 @@ from vectormesh.data import (
     Vectorizer,
     build,
 )
-from vectormesh.types import VectorMeshComponent, VectorMeshError
 
 __version__ = version("vectormesh")
 
 __all__ = [
-    "VectorMeshComponent",
-    "VectorMeshError",
     "VectorCache",
     "LabelEncoder",
     "build",

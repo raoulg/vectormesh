@@ -9,8 +9,10 @@ from beartype import beartype
 from jaxtyping import Float, jaxtyped
 from torch import Tensor
 
+from vectormesh.types import BaseComponent
 
-class Skip(nn.Module):
+
+class Skip(BaseComponent):
     """Residual skip connection: output = batchnorm(transform(x) + projection(x))
     - transform is the pipeline we want to apply to the input
     - in_size is the dimensionality of the input; we need this for the layernorm
@@ -42,7 +44,7 @@ class Skip(nn.Module):
         return transformed + residual
 
 
-class Gate(nn.Module):
+class Gate(BaseComponent):
     """Simple gating: output = sigmoid(W·x) * x"""
 
     def __init__(self, hidden_size: int):
@@ -54,7 +56,7 @@ class Gate(nn.Module):
         return F.sigmoid(self.project(x)) * x
 
 
-class Highway(nn.Module):
+class Highway(BaseComponent):
     """Highway network: G * T(x) + (1-G) * x"""
 
     def __init__(self, transform: nn.Module, hidden_size: int):
@@ -72,7 +74,7 @@ class Highway(nn.Module):
         return gate * transformed + (1 - gate) * x
 
 
-class MoE(nn.Module):
+class MoE(BaseComponent):
     """
     See https://arxiv.org/abs/1701.06538 for paper
     """

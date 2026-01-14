@@ -1,4 +1,4 @@
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 
 import torch
 import torch.nn as nn
@@ -6,8 +6,10 @@ from beartype import beartype
 from jaxtyping import Float, jaxtyped
 from torch import Tensor
 
+from vectormesh.types import BaseComponent
 
-class BaseAggregator(ABC, nn.Module):
+
+class BaseAggregator(BaseComponent):
     """Base class for aggregating 3D -> 2D tensors.
     We use "forward" to be compatible with nn.Module
     """
@@ -74,4 +76,5 @@ class RNNAggregator(BaseAggregator):
         self, embeddings: Float[Tensor, "batch _ dim"]
     ) -> Float[Tensor, "batch dim"]:
         output, _ = self.rnn(embeddings)
+        return output[:, -1, :]
         return output[:, -1, :]

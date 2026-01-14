@@ -14,7 +14,7 @@ from pydantic import Field, PrivateAttr, model_validator
 from torch import Tensor
 from transformers import AutoConfig, AutoModel, AutoTokenizer
 
-from vectormesh.types import VectorMeshComponent, VectorMeshError
+from vectormesh.types import Cachable, VectorMeshError
 
 
 def detect_device() -> str:
@@ -26,7 +26,7 @@ def detect_device() -> str:
         return "cpu"
 
 
-class BaseVectorizer(ABC, VectorMeshComponent):
+class BaseVectorizer(ABC, Cachable):
     """
     Base class for all vectorizers.
 

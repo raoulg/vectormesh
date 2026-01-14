@@ -2,6 +2,8 @@ import torch.nn as nn
 from beartype import beartype
 from jaxtyping import jaxtyped
 
+from vectormesh.types import TensorInput
+
 
 class Serial(nn.Module):
     """Sequential composition - just runs components in order.
@@ -9,20 +11,16 @@ class Serial(nn.Module):
     """
 
     components: nn.ModuleList
-    _all_components: list
 
-    def __init__(self, components: list):
+    def __init__(self, components: list[nn.Module]):
         super().__init__()
-        self.components = nn.ModuleList(
-            [c for c in components if isinstance(c, nn.Module)]
-        )
-        self._all_components = components
+        self.components = nn.ModuleList(components)
 
     @jaxtyped(typechecker=beartype)
-    def forward(self, tensors):
+    def forward(self, tensors: TensorInput) -> TensorInput:
         """Execute pipeline. Type checking via component decorators."""
         result = tensors
-        for component in self._all_components:
+        for component in self.components:
             result = component(result)
         return result
 
@@ -33,13 +31,11 @@ class Parallel(nn.Module):
     """
 
     branches: nn.ModuleList
-    _all_branches: list
 
-    def __init__(self, branches):
+    def __init__(self, branches: list[nn.Module]):
         super().__init__()
-        self.branches = nn.ModuleList([b for b in branches if isinstance(b, nn.Module)])
-        self._all_branches = branches
+        self.branches = nn.ModuleList(branches)
 
     @jaxtyped(typechecker=beartype)
-    def forward(self, tensors):
-        return tuple(branch(t) for branch, t in zip(self._all_branches, tensors))
+    def forward(self, tensors: TensorInput) -> TensorInput:
+        return tuple(branch(t) for branch, t in zip(self.branches, tensors))

@@ -6,14 +6,14 @@ from typing import Generic, Optional, TypeVar, get_args, get_type_hints
 from datasets import Dataset, DatasetDict, Features, Sequence, Value, load_from_disk
 from loguru import logger
 
-from vectormesh.types import VectorMeshComponent, VectorMeshError
+from vectormesh.types import Cachable, VectorMeshError
 
 from .vectorizers import BaseVectorizer
 
 TVectorizer = TypeVar("TVectorizer", bound=BaseVectorizer)
 
 
-class VectorCache(VectorMeshComponent, Generic[TVectorizer]):
+class VectorCache(Cachable, Generic[TVectorizer]):
     name: str
     cache_dir: Path
     dataset: Optional[Dataset] = None
@@ -195,9 +195,6 @@ class VectorCache(VectorMeshComponent, Generic[TVectorizer]):
     def __getitem__(self, key):
         return self._ensure_dataset_loaded()[key]
 
-    def __iter__(self):
-        return iter(self._ensure_dataset_loaded())
-
     def __getattr__(self, name: str):
         if name.startswith("_"):
             raise AttributeError(
@@ -206,3 +203,6 @@ class VectorCache(VectorMeshComponent, Generic[TVectorizer]):
 
         attribute = getattr(self._ensure_dataset_loaded(), name)
         return attribute
+
+    def __iter__(self):
+        return iter(self._ensure_dataset_loaded())

@@ -3,30 +3,40 @@ from beartype import beartype
 from jaxtyping import Float, jaxtyped
 from torch import Tensor
 
+from vectormesh.types import BaseComponent
 
-class NeuralNet(nn.Module):
+
+class NeuralNet(BaseComponent):
     """Two-layer feedforward network with GELU activation."""
 
     def __init__(self, hidden_size: int, out_size: int):
         super().__init__()
+        self.hidden_size = hidden_size
+        self.out_size = out_size
         self.fc1 = nn.Linear(hidden_size, hidden_size)
         self.fc2 = nn.Linear(hidden_size, out_size)
         self.activation = nn.GELU()
 
     @jaxtyped(typechecker=beartype)
-    def forward(self, x: Float[Tensor, "batch dim1"]) -> Float[Tensor, "batch dim2"]:
+    def forward(
+        self, x: Float[Tensor, "batch {self.hidden_size}"]
+    ) -> Float[Tensor, "batch {self.out_size}"]:
         return self.fc2(self.activation(self.fc1(x)))
 
 
-class Projection(nn.Module):
+class Projection(BaseComponent):
     """Linear projection layer."""
 
-    def __init__(self, in_size: int, out_size: int):
+    def __init__(self, hidden_size: int, out_size: int):
         super().__init__()
-        self.proj = nn.Linear(in_size, out_size)
+        self.hidden_size = hidden_size
+        self.out_size = out_size
+        self.proj = nn.Linear(hidden_size, out_size)
 
     @jaxtyped(typechecker=beartype)
-    def forward(self, x: Float[Tensor, "batch dim1"]) -> Float[Tensor, "batch dim2"]:
+    def forward(
+        self, x: Float[Tensor, "batch {self.hidden_size}"]
+    ) -> Float[Tensor, "batch {self.out_size}"]:
         return self.proj(x)
 
 
@@ -35,6 +45,7 @@ class Attention(nn.Module):
 
     def __init__(self, hidden_size: int, num_heads: int = 8, dropout: float = 0.1):
         super().__init__()
+        self.hidden_size = hidden_size
         self.attn = nn.MultiheadAttention(
             embed_dim=hidden_size,
             num_heads=num_heads,
@@ -44,8 +55,8 @@ class Attention(nn.Module):
 
     @jaxtyped(typechecker=beartype)
     def forward(
-        self, x: Float[Tensor, "batch seq dim"]
-    ) -> Float[Tensor, "batch seq dim"]:
+        self, x: Float[Tensor, "batch seq {self.hidden_size}"]
+    ) -> Float[Tensor, "batch seq {self.hidden_size}"]:
         # Self-attention: query, key, value all come from x
         attn_output, _ = self.attn(x, x, x, need_weights=False)
         return attn_output

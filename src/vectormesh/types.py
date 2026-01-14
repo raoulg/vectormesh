@@ -1,6 +1,10 @@
-from typing import Optional
+from abc import ABC, abstractmethod
+from typing import Optional, Tuple, Union
 
+from beartype import beartype
+from jaxtyping import Float, jaxtyped
 from pydantic import BaseModel, ConfigDict
+from torch import Tensor, nn
 
 
 class VectorMeshError(Exception):
@@ -24,12 +28,24 @@ class VectorMeshError(Exception):
         self.fix = fix
 
 
-class VectorMeshComponent(BaseModel):
+class Cachable(BaseModel):
     """
-    Base class for all VectorMesh components.
-
+    Base class for cachable components.
     Enforces strict validation and immutable configuration using Pydantic.
-    All vectorizers, aggregators, and combinators inherit from this base.
     """
 
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
+
+
+TensorInput = Union[Float[Tensor, "..."], Tuple[Float[Tensor, "..."], ...]]
+
+
+class BaseComponent(nn.Module, ABC):
+    """Root class for all pipeline components."""
+
+    def __init__(self):
+        super().__init__()
+
+    @abstractmethod
+    @jaxtyped(typechecker=beartype)
+    def forward(self, tensors: TensorInput) -> Float[Tensor, "..."]: ...
