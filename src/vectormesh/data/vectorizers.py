@@ -3,6 +3,7 @@
 import re
 from abc import ABC, abstractmethod
 from collections import Counter
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 import matplotlib.pyplot as plt
@@ -392,7 +393,11 @@ class RegexVectorizer(BaseVectorizer):
         return {self.col_name: vectors}
 
     def print_stats(
-        self, texts: Optional[list[str]] = None, top_k: int = 20, plot: bool = True
+        self,
+        texts: Optional[list[str]] = None,
+        top_k: int = 20,
+        plot: bool = True,
+        path: Optional[Path] = None,
     ):
         if texts is None:
             if self._match_counts is None:
@@ -418,6 +423,8 @@ class RegexVectorizer(BaseVectorizer):
             plt.ylabel("Frequency")
             plt.title(f"Top {len(counts)} Pattern Matches")
             plt.tight_layout()
+            if path is not None:
+                plt.savefig(path)
             plt.show()
 
     @property
