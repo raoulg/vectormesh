@@ -77,8 +77,17 @@ class MASE(Metric):
 
 
 class Accuracy(Metric):
+    """Top-1 accuracy.
+
+    Accepts either integer class targets ``y`` of shape ``(batch,)`` or one-hot /
+    soft targets of shape ``(batch, num_classes)`` (as produced by ``OneHot`` +
+    ``Collate``). In the latter case the target class is taken as ``argmax``.
+    """
+
     def _compute(self, y: torch.Tensor, yhat: torch.Tensor) -> torch.Tensor:
-        predictions = yhat.argmax(dim=1)
+        predictions = yhat.argmax(dim=-1)
+        if y.shape == yhat.shape:  # one-hot / soft targets -> class indices
+            y = y.argmax(dim=-1)
         return (predictions == y).float().mean()
 
     def __repr__(self) -> str:
