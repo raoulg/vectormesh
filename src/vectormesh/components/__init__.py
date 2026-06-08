@@ -7,6 +7,7 @@ from .aggregation import (
     MaskedMeanAggregator,
     RNNAggregator,
 )
+from .augmentation import GaussianNoise
 from .connectors import Concatenate2D, Stack2D
 from .gating import Gate, Highway, MoE, Skip
 from .neural import Attention, NeuralNet, Projection, TransformerBlock
@@ -19,6 +20,7 @@ __all__ = [
     "MeanAggregator",
     "MaskedMeanAggregator",
     "RNNAggregator",
+    "GaussianNoise",
     "Concatenate2D",
     "Stack2D",
     "Gate",
