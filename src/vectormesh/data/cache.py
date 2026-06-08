@@ -30,6 +30,7 @@ class VectorCache(Cachable, Generic[TVectorizer]):
         vector_batch: int = 32,
         map_batch: int = 32,
         column_name: Optional[str] = None,
+        remove_columns: Optional[list[str]] = None,
     ) -> "VectorCache[TVectorizer]":
         """
         Args:
@@ -43,6 +44,7 @@ class VectorCache(Cachable, Generic[TVectorizer]):
             vector_batch (Optional[int], optional): the batchsize of the vectorizer (eg the huggingface model). Defaults to 32.
             map_batch (Optional[int], optional): The batchsize for the mapping over the dataset. Defaults to 32.
             column_name (Optional[str], optional): how to store the output of the vectorizer in the dataset. If not provided, will use vectorizer.col_name. Defaults to None.
+            remove_columns (Optional[list[str]], optional): source columns to drop from the cached dataset. Useful to keep a distributable cache small, e.g. remove_columns=["image"] after embedding. Defaults to None.
 
         Returns:
             VectorCache[TVectorizer]
@@ -67,6 +69,11 @@ class VectorCache(Cachable, Generic[TVectorizer]):
         if features is None:
             features = cls.get_features(dataset, tensord, embedding_column=column_name)
 
+        # Drop any requested source columns from the output schema so it matches
+        # the dataset returned by map(..., remove_columns=...).
+        for col in remove_columns or []:
+            features.pop(col, None)
+
         now = datetime.now().strftime("%Y%m%d%H%M%S")
         cachetag = f"{now}_{dataset_tag}_{column_name}"
         filepath = cache_dir / cachetag
@@ -75,10 +82,13 @@ class VectorCache(Cachable, Generic[TVectorizer]):
 
         try:
             new_dataset = dataset.map(
-                lambda batch: vectorizer(batch["text"], batchsize=vector_batch),
+                lambda batch: vectorizer(
+                    batch[vectorizer.input_col], batchsize=vector_batch
+                ),
                 batched=True,
                 batch_size=map_batch,  # Number of documents per batch
                 features=features,
+                remove_columns=remove_columns,
             )
 
             new_dataset.save_to_disk(filepath)

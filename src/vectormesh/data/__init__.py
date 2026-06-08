@@ -2,7 +2,12 @@
 
 from .cache import VectorCache
 from .dataset import Collate, CollateParallel, LabelEncoder, OneHot, build
-from .vectorizers import BaseVectorizer, RegexVectorizer, Vectorizer
+from .vectorizers import (
+    BaseVectorizer,
+    ImageVectorizer,
+    RegexVectorizer,
+    Vectorizer,
+)
 
 __all__ = [
     "VectorCache",
@@ -13,5 +18,6 @@ __all__ = [
     "build",
     "BaseVectorizer",
     "Vectorizer",
+    "ImageVectorizer",
     "RegexVectorizer",
 ]

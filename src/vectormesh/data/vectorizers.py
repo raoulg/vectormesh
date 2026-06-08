@@ -12,7 +12,7 @@ from jaxtyping import Float, Int, jaxtyped
 from loguru import logger
 from pydantic import Field, PrivateAttr, model_validator
 from torch import Tensor
-from transformers import AutoConfig, AutoModel, AutoTokenizer
+from transformers import AutoConfig, AutoImageProcessor, AutoModel, AutoTokenizer
 
 from vectormesh.types import Cachable
 
@@ -34,6 +34,7 @@ class BaseVectorizer(ABC, Cachable):
     - Have a model_name, device, and metadata
     - model_name is used in the VectorCache to identify the model used for a vectorizer
     - col_name is used to store the output of the vectorizer in the dataset
+    - input_col is the dataset column the vectorizer reads from (e.g. "text", "image")
     - device is for hardware acceleration, if applicable
     - Implement __call__ that returns dict[str, list[Float[Tensor, "..."]]]
     - The exact tensor dimensionality can vary by implementation
@@ -41,6 +42,7 @@ class BaseVectorizer(ABC, Cachable):
 
     model_name: str
     col_name: str
+    input_col: str = "text"
     device: str = Field(default_factory=detect_device)
 
     _metadata: Any = PrivateAttr()
@@ -61,13 +63,13 @@ class BaseVectorizer(ABC, Cachable):
     @abstractmethod
     @jaxtyped(typechecker=beartype)
     def __call__(
-        self, texts: list[str], batchsize: int
+        self, inputs: list, batchsize: int
     ) -> dict[str, list[Float[Tensor, "..."]]]:
         """
-        Process texts and return embedding.
+        Process a batch of inputs and return embeddings.
 
         Args:
-            texts: List of input texts
+            inputs: List of input items (texts, images, ...) read from input_col
             batchsize: Batch size for processing
 
         Returns:
@@ -238,12 +240,12 @@ class Vectorizer(BaseVectorizer):
 
     @jaxtyped(typechecker=beartype)
     def __call__(
-        self, texts: list[str], batchsize: int
+        self, inputs: list[str], batchsize: int
     ) -> dict[str, list[Float[Tensor, "_ dim"]]]:
-        input_ids, attention, overflow = self.tokenize(texts)
+        input_ids, attention, overflow = self.tokenize(inputs)
         embedded, attention = self.embed(input_ids, attention, batchsize=batchsize)
         agg = self.aggregate(embedded, attention)
-        return self.extend(agg, overflow, num_docs=len(texts))
+        return self.extend(agg, overflow, num_docs=len(inputs))
 
     @property
     def get_model(self):
@@ -252,6 +254,120 @@ class Vectorizer(BaseVectorizer):
     @property
     def get_tokenizer(self):
         return self._tokenizer
+
+
+class ImageVectorizer(BaseVectorizer):
+    """
+    Image vectorizer using HuggingFace vision models.
+
+    Mirrors :class:`Vectorizer`, but for images: it uses an ``AutoImageProcessor``
+    plus an ``AutoModel`` (e.g. a small CNN like ``microsoft/resnet-18`` or a
+    distilled ViT like ``facebook/dinov2-small``) and produces a single embedding
+    vector per image, shape ``(dim,)``.
+
+    Because each image collapses to one vector (``tensordtype == 1``), the cached
+    output plugs directly into the same downstream pipeline as the regex path:
+    ``Collate(..., padder=torch.stack)`` + ``Serial([NeuralNet(...)])``.
+
+    The model is only ever run to fill the VectorCache, so the (one-time) cost
+    scales with model size while training the head on the cached vectors stays
+    cheap on CPU. Swap ``model_name`` to trade embedding quality for speed.
+    """
+
+    model_name: str
+    col_name: str = "embed"
+    input_col: str = "image"
+    device: str = Field(default_factory=detect_device)
+
+    _metadata: Any = PrivateAttr()
+    _processor: Any = PrivateAttr()
+    _model: Any = PrivateAttr()
+    _hidden_size: int = PrivateAttr()
+    _effective_max_length: Optional[int] = PrivateAttr(default=None)
+
+    @model_validator(mode="after")
+    def initialize_model(self):
+        self._metadata = AutoConfig.from_pretrained(self.model_name)
+        self._processor = AutoImageProcessor.from_pretrained(self.model_name)
+        self._model = AutoModel.from_pretrained(self.model_name).to(self.device).eval()
+        self._effective_max_length = None
+
+        # Probe the embedding dimension with a dummy forward. This is robust across
+        # architectures (ResNet config exposes `hidden_sizes`, ViT/DINOv2 exposes
+        # `hidden_size`) and matches whatever `_pool` actually returns.
+        self._hidden_size = self._probe_dim()
+
+        logger.info(f"Using device: {self.device}")
+        logger.info(f"Image embedding dim: {self._hidden_size}")
+        return self
+
+    @jaxtyped(typechecker=beartype)
+    def _pool(self, outputs) -> Float[Tensor, "batch dim"]:
+        """
+        Reduce a vision model's output to one vector per image.
+
+        - If a ``pooler_output`` is present we use it, flattening any trailing
+          spatial dims (ResNet: ``(b, dim, 1, 1)`` -> ``(b, dim)``; ViT: ``(b, dim)``).
+        - Otherwise we fall back on ``last_hidden_state``: average over the token
+          dimension for 3D ``(b, seq, dim)`` outputs, or over the spatial dims for
+          4D ``(b, dim, h, w)`` outputs.
+        """
+        pooled = getattr(outputs, "pooler_output", None)
+        if pooled is not None:
+            return pooled.reshape(pooled.shape[0], -1)
+
+        hidden = outputs.last_hidden_state
+        if hidden.dim() == 3:  # (batch, seq, dim) -> ViT-like
+            return hidden.mean(dim=1)
+        if hidden.dim() == 4:  # (batch, dim, h, w) -> CNN-like
+            return hidden.mean(dim=(-2, -1))
+        raise ValueError(
+            f"Cannot pool last_hidden_state with {hidden.dim()} dimensions."
+        )
+
+    def _probe_dim(self) -> int:
+        from PIL import Image
+
+        dummy = Image.new("RGB", (224, 224))
+        inputs = self._processor([dummy], return_tensors="pt").to(self.device)
+        with torch.no_grad():
+            outputs = self._model(**inputs)
+        return int(self._pool(outputs).shape[-1])
+
+    @jaxtyped(typechecker=beartype)
+    def __call__(
+        self, inputs: list, batchsize: int
+    ) -> dict[str, list[Float[Tensor, "dim"]]]:
+        vectors: list[Tensor] = []
+        for i in range(0, len(inputs), batchsize):
+            batch = [img.convert("RGB") for img in inputs[i : i + batchsize]]
+            inputs = self._processor(batch, return_tensors="pt").to(self.device)
+            with torch.no_grad():
+                outputs = self._model(**inputs)
+            pooled = self._pool(outputs).cpu()
+            vectors.extend([vec for vec in pooled])
+        return {self.col_name: vectors}
+
+    @property
+    def get_metadata(self) -> dict:
+        return {
+            "model_name": self.model_name,
+            "col_name": self.col_name,
+            "hidden_size": self._hidden_size,
+            "context_size": self._effective_max_length,
+        }
+
+    @property
+    def get_hidden_size(self) -> int:
+        return self._hidden_size
+
+    @property
+    def get_model(self):
+        return self._model
+
+    @property
+    def get_processor(self):
+        return self._processor
 
 
 class RegexVectorizer(BaseVectorizer):
@@ -356,7 +472,7 @@ class RegexVectorizer(BaseVectorizer):
 
     @jaxtyped(typechecker=beartype)
     def __call__(
-        self, texts: list[str], batchsize: int = 32
+        self, inputs: list[str], batchsize: int = 32
     ) -> dict[str, list[Float[Tensor, "hidden_size"]]]:
         if not self._pattern_to_idx:
             raise RuntimeError(
@@ -365,7 +481,7 @@ class RegexVectorizer(BaseVectorizer):
 
         vectors = []
 
-        for text in texts:
+        for text in inputs:
             # Create zero vector
             vector = torch.zeros(len(self._pattern_to_idx), dtype=torch.float32)
 
