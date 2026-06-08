@@ -16,6 +16,7 @@ dependencies = [
     "mltrainer>=0.2.7.1",
     "networkx>=3.6.1",
     "numpy>=2.4.0",
+    "pillow>=10.0.0",
     "protobuf>=6.33.3",
     "pydantic>=2.12.5",
     "pyvis>=0.3.2",

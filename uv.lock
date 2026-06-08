@@ -4989,7 +4989,7 @@ wheels = [
 
 [[package]]
 name = "vectormesh"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "beartype" },
@@ -5000,6 +5000,7 @@ dependencies = [
     { name = "mltrainer" },
     { name = "networkx" },
     { name = "numpy" },
+    { name = "pillow" },
     { name = "protobuf" },
     { name = "pydantic" },
     { name = "pyvis" },
@@ -5030,6 +5031,7 @@ requires-dist = [
     { name = "mltrainer", specifier = ">=0.2.7.1" },
     { name = "networkx", specifier = ">=3.6.1" },
     { name = "numpy", specifier = ">=2.4.0" },
+    { name = "pillow", specifier = ">=10.0.0" },
     { name = "protobuf", specifier = ">=6.33.3" },
     { name = "pydantic", specifier = ">=2.12.5" },
     { name = "pyvis", specifier = ">=0.3.2" },
