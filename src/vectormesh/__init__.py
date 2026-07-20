@@ -5,6 +5,7 @@ from loguru import logger
 
 from vectormesh.data import (
     BaseVectorizer,
+    ChunkedRegexVectorizer,
     LabelEncoder,
     RegexVectorizer,
     VectorCache,
@@ -21,6 +22,7 @@ __all__ = [
     "BaseVectorizer",
     "Vectorizer",
     "RegexVectorizer",
+    "ChunkedRegexVectorizer",
 ]
 
 logger.remove()
