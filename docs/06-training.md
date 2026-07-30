@@ -1,0 +1,200 @@
+# 6. Training
+
+VectorMesh does not implement a training loop — it uses [`mltrainer`](https://pypi.org/project/mltrainer/).
+The library's job is to hand `mltrainer` a model, a dataloader and a metric that all agree about
+shapes.
+
+---
+
+## 6.1 The full wiring
+
+```python
+from pathlib import Path
+
+import torch
+import torch.optim as optim
+from mltrainer import ReportTypes, Trainer, TrainerSettings
+from torch.utils.data import DataLoader
+
+from vectormesh.components import FixedPadding, MaskedMeanAggregator, NeuralNet, Serial
+from vectormesh.components.metrics import F1Score
+from vectormesh.data import Collate, OneHot
+from vectormesh.data.cache import VectorCache
+from vectormesh.data.vectorizers import detect_device
+
+# 1. data
+traincache = VectorCache.load(path=trainpath)
+validcache = VectorCache.load(path=validpath)
+
+onehot = OneHot(num_classes=32, label_col="labels", target_col="onehot")
+train_oh = traincache.dataset.map(onehot)
+valid_oh = validcache.dataset.map(onehot)
+
+collate_fn = Collate(
+    embedding_col="legal_dutch",
+    target_col="onehot",
+    padder=FixedPadding(max_chunks=30),
+)
+trainloader = DataLoader(train_oh, batch_size=32, shuffle=True,  collate_fn=collate_fn)
+validloader = DataLoader(valid_oh, batch_size=32, shuffle=False, collate_fn=collate_fn)
+
+# 2. model
+hidden_size = traincache.metadata["legal_dutch"]["hidden_size"]
+pipeline = Serial([MaskedMeanAggregator(), NeuralNet(hidden_size, 32)])
+
+# 3. training
+settings = TrainerSettings(
+    epochs=10,
+    metrics=[F1Score()],
+    logdir=Path("logs").absolute(),
+    train_steps=len(trainloader),
+    valid_steps=len(validloader),
+    reporttypes=[ReportTypes.TENSORBOARD, ReportTypes.TOML],
+)
+
+trainer = Trainer(
+    model=pipeline,
+    settings=settings,
+    loss_fn=torch.nn.BCEWithLogitsLoss(),
+    optimizer=optim.Adam,
+    traindataloader=trainloader,
+    validdataloader=validloader,
+    scheduler=optim.lr_scheduler.ReduceLROnPlateau,
+    device=detect_device(),
+)
+trainer.loop()
+```
+
+`detect_device()` (from `vectormesh.data.vectorizers`) returns `cuda` → `mps` → `cpu` in order of
+availability. For a head this small, `cpu` is often competitive — the data is already vectors.
+
+---
+
+## 6.2 Choosing the loss
+
+| Task shape | Target from `OneHot` | Loss | Metric |
+|---|---|---|---|
+| **Multi-label** (a document can carry several legal facts) | multi-hot float vector | `BCEWithLogitsLoss` | `F1Score(average="micro")` |
+| **Single-label** (one flower species per image) | one-hot float vector | `CrossEntropyLoss` | `Accuracy` (+ `F1Score`) |
+
+Both losses take **logits**, not probabilities — no `Sigmoid`/`Softmax` at the end of your
+pipeline. `F1Score` applies its own `sigmoid` internally, consistent with `BCEWithLogitsLoss`.
+
+`CrossEntropyLoss` accepts the one-hot float vector as a soft target, which is why notebook 4 can
+use the same `OneHot` + `Collate` machinery as the text notebooks.
+
+---
+
+## 6.3 Metrics against one-hot targets
+
+`Collate` always stacks the target column into `(B, n_classes)`. Both shipped classifiers cope:
+
+- `Accuracy` compares `argmax(yhat)` against `argmax(y)` when shapes match.
+- `F1Score` thresholds `sigmoid(yhat)` at 0.5 and computes micro/macro F1 element-wise.
+
+Each metric's `__repr__` is the label used by the reporters (`"F1-micro"`, `"Accuracy"`) — keep
+those strings stable so runs stay comparable across experiments.
+
+---
+
+## 6.4 `TrainerSettings` worth knowing
+
+```python
+settings = TrainerSettings(
+    epochs=150,
+    metrics=[F1Score()],
+    logdir=Path("logs/MoE_parallel").absolute(),
+    train_steps=len(trainloader),
+    valid_steps=len(validloader),
+    reporttypes=[ReportTypes.TENSORBOARD, ReportTypes.TOML],
+    earlystop_kwargs={"save": True, "verbose": True, "patience": 40},
+    scheduler_kwargs={"factor": 0.5, "patience": 20},
+)
+```
+
+- `train_steps` / `valid_steps` — batches per epoch; use `len(loader)` for a full pass.
+- `reporttypes` — `TENSORBOARD` for curves, `TOML` for a machine-readable record of the run.
+- `earlystop_kwargs` — patience must exceed the scheduler's patience, or you stop before the
+  reduced learning rate has a chance to help. The scripts use 40 vs 20.
+- `logdir` — pass an **absolute** path; a relative one resolves against the notebook's cwd.
+
+Watch curves with:
+
+```bash
+uv run tensorboard --logdir logs
+```
+
+---
+
+## 6.5 The scripts
+
+The `scripts/` folder is the batch counterpart to the notebooks — same pipelines, real dataset
+sizes, no subsampling.
+
+| Script | Purpose |
+|---|---|
+| `build_dataset.py` | instructor-side: JSONL → threshold-filtered train/valid/test splits |
+| `create_cache_aktes.py`, `create_cache_imdb.py` | build the initial embedding caches |
+| `embed_legal_dutch.py`, `embed_multilegal.py`, `embed_debertav3.py` | cache the same corpus with different encoders (the encoder-comparison experiment) |
+| `add_chunked_regex.py` | extend an embedding cache with a **chunk-aligned** regex column |
+| `train_moe.py` | MoE over embeddings only |
+| `train_moe_parallel.py` | MoE over per-chunk fused embedding + regex |
+
+Run them with `uv run python scripts/<name>.py`.
+
+### The chunk-aligned workflow
+
+`add_chunked_regex.py` is the piece worth reading closely, because it demonstrates metadata as a
+contract:
+
+```python
+col_meta = metadata["legal_dutch"]
+model_tag    = col_meta["model_tag"]
+context_size = col_meta["context_size"]
+stride       = col_meta.get("stride")          # older caches predate this field
+if stride is None:
+    stride = context_size // STRIDE_DIVISOR    # documented fallback, with a warning
+```
+
+Those three values are then passed straight into `ChunkedRegexVectorizer`, guaranteeing the two
+columns chunk identically. The script also filters candidate caches by name (`"regex" not in
+p.name`) so it always aligns to the *embedding* cache, never to a previously extended one.
+
+Order of operations:
+
+```bash
+uv run python scripts/create_cache_aktes.py    # 1. embeddings  -> artefacts/..._legal_dutch
+uv run python scripts/add_chunked_regex.py     # 2. + regex     -> artefacts/..._chunked_regex
+uv run python scripts/train_moe_parallel.py    # 3. train
+```
+
+---
+
+## 6.6 Reproducibility checklist
+
+Before comparing two runs, confirm they share:
+
+- the same cache (folder name includes the timestamp — note it down);
+- the same `max_chunks` — changing it changes how much of each document the model sees;
+- the same regex fitting parameters (`min_doc_frequency`, `max_features`) — these change
+  `hidden_size` and therefore the model's input width;
+- the same split subsampling. The notebooks use `.select(range(1024))` **for demo speed only**;
+  results from a 1024-document subset are not comparable to full-dataset results.
+
+---
+
+## 6.7 Tests and tooling
+
+```bash
+uv sync                              # install
+uv run pytest -m "not integration"   # unit tests, no model downloads
+uv run pytest                        # everything, downloads HF models
+uv run ruff check src tests          # lint
+uv run ty check                      # type check
+```
+
+`pytest` is configured (in `pyproject.toml`) to always produce coverage — terminal plus an HTML
+report in `htmlcov/`. Ruff has `F722`/`F821` disabled project-wide, because jaxtyping's
+string annotations (`Float[Tensor, "batch dim"]`) otherwise read as syntax errors to the linter.
+
+Next: [API reference](07-api-reference.md).

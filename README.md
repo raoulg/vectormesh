@@ -1,457 +1,154 @@
 # VectorMesh
 
-A PyTorch-based framework for efficient vector embedding management and multi-modal text classification. VectorMesh provides a flexible pipeline architecture for combining different types of text embeddings and building sophisticated neural architectures.
+A PyTorch framework for **embed once, reuse many times**.
 
-## Features
+A large pretrained encoder — a BERT-family text model, a vision CNN/ViT, or a hand-written regex
+feature extractor — is run over a dataset exactly once, by whoever has the hardware and the
+judgement to pick it. The resulting vectors go to disk as a `VectorCache`: a versioned,
+documented artefact. Everything after that trains a *small* head on those frozen vectors, cheaply
+enough to run on a laptop CPU.
 
-- **Efficient Vector Caching**: Pre-compute and store embeddings to avoid redundant processing
-- **Multiple Vectorizers**: Support for Hugging Face models and regex-based feature extraction
-- **Flexible Pipeline Architecture**: Compose models using Serial and Parallel pipelines
-- **Chunked Document Processing**: Handle long documents with automatic chunking and padding
-- **Advanced Components**: Aggregation, gating mechanisms, skip connections, and Mixture of Experts (MoE)
-- **Easy Extension**: Add new vector types to existing caches without recomputing
+That split is the point. One embedding job, many models trained against its output — and the
+interesting design space (fusing representations, gating, mixtures of experts) lives entirely on
+the cheap side of it.
+
+## 📚 Documentation
+
+Full documentation is in **[`docs/`](docs/README.md)**.
+
+| | |
+|---|---|
+| [Core concepts](docs/01-core-concepts.md) | The embed-once economics, thinking at the vector level, the 1D/2D/3D tensor-flow ladder |
+| [Tensor contracts](docs/02-tensor-contracts.md) | Shapes as a type system: jaxtyping + beartype, and how to read a shape error |
+| [The data layer](docs/03-data-layer.md) | Vectorizers, `VectorCache`, metadata, `DatasetSchema`, collation |
+| [Components](docs/04-components.md) | Every building block, with shapes and when to reach for it |
+| [Architectures](docs/05-architectures.md) | Composition patterns from a two-line baseline to chunk-level MoE fusion |
+| [Training](docs/06-training.md) | Metrics, loss choice, `mltrainer` wiring, the batch scripts |
+| [API reference](docs/07-api-reference.md) | Signature tables for everything exported |
+| [Teaching path](docs/08-teaching-path.md) | Notebook-by-notebook map and the questions each one raises |
 
 ## Installation
 
 ```bash
-# Using uv (recommended)
 uv sync
 ```
 
-## Understanding Type Checking with Jaxtyping and Beartype
+Requires Python ≥ 3.12. See `pyproject.toml` for the full dependency list.
 
-VectorMesh uses **jaxtyping** and **beartype** for runtime tensor shape validation. While this may produce new errors you haven't seen before, it's extremely helpful for two reasons:
+## Quick start
 
-### 1. Understanding Tensor Dimensionality
+```python
+from pathlib import Path
 
-Type annotations make it explicit what tensor shapes each function expects and returns:
+import torch
+from torch.utils.data import DataLoader
+
+from vectormesh import VectorCache
+from vectormesh.components import FixedPadding, MaskedMeanAggregator, NeuralNet, Serial
+from vectormesh.data import Collate, OneHot
+
+cache = VectorCache.load(path=Path("artefacts/my_dataset_train"))
+hidden_size = cache.metadata["legal_dutch"]["hidden_size"]
+
+data = cache.dataset.map(OneHot(num_classes=32, label_col="labels", target_col="onehot"))
+loader = DataLoader(
+    data,
+    batch_size=32,
+    shuffle=True,
+    collate_fn=Collate(
+        embedding_col="legal_dutch",
+        target_col="onehot",
+        padder=FixedPadding(max_chunks=30),
+    ),
+)
+
+pipeline = Serial([
+    MaskedMeanAggregator(),                  # (batch, chunks, dim) -> (batch, dim)
+    NeuralNet(hidden_size, out_size=32),     # (batch, dim)         -> (batch, 32)
+])
+```
+
+Then hand `pipeline` and `loader` to `mltrainer.Trainer` — see
+[Training](docs/06-training.md) for the full wiring.
+
+Building a cache instead of loading one, extending a cache with extra feature columns, and the
+image path are all covered in [The data layer](docs/03-data-layer.md).
+
+## What's in the box
+
+**Data** — `VectorCache`, `Vectorizer` (chunked text), `ImageVectorizer`, `RegexVectorizer`,
+`ChunkedRegexVectorizer`, `DatasetSchema`, `OneHot`, `Collate`, `CollateParallel`, `LabelEncoder`.
+
+**Components** — pipelines (`Serial`, `Parallel`), padding (`FixedPadding`, `DynamicPadding`),
+aggregation (`Mean`, `MaskedMean`, `Attention`, `RNN`), neural blocks (`NeuralNet`, `Projection`,
+`Attention`, `TransformerBlock`), connectors (`Concatenate2D`, `Concatenate3D`, `Stack2D`), gating
+(`Skip`, `Gate`, `Highway`, `MoE`), augmentation (`GaussianNoise`), metrics (`Accuracy`, `F1Score`,
+`MAE`, `MASE`).
+
+Details and signatures: [Components](docs/04-components.md),
+[API reference](docs/07-api-reference.md).
+
+## Runtime type checking
+
+VectorMesh annotates every `forward` with jaxtyping shapes, checked at runtime by beartype:
 
 ```python
 @jaxtyped(typechecker=beartype)
-def forward(
-    self, embeddings: Float[Tensor, "batch chunks dim"]
-) -> Float[Tensor, "batch dim"]:
-    return embeddings.mean(dim=1)
+def forward(self, tensors: Float[Tensor, "batch chunks dim"]) -> Float[Tensor, "batch dim"]:
+    return tensors.mean(dim=1)
 ```
 
-This tells you immediately that this function:
-- **Input**: 3D tensor with shape (batch_size, num_chunks, embedding_dim)
-- **Output**: 2D tensor with shape (batch_size, embedding_dim)
-
-### 2. Catching Shape Mismatches Early
-
-Without type checking, PyTorch often silently processes tensors with wrong shapes, leading to subtle bugs:
-
-```python
-# WITHOUT type checking - this runs but gives wrong results!
-linear = nn.Linear(768, 32)
-x = torch.randn(16, 30, 768)  # 3D tensor: (batch, chunks, dim)
-output = linear(x)  # Returns (16, 30, 32) - probably not what you want!
-print(output.shape)  # torch.Size([16, 30, 32])
-
-# WITH type checking - this catches the error immediately!
-class SafeProjection(nn.Module):
-    def __init__(self, in_size: int, out_size: int):
-        super().__init__()
-        self.linear = nn.Linear(in_size, out_size)
-
-    @jaxtyped(typechecker=beartype)
-    def forward(
-        self, x: Float[Tensor, "batch dim"]  # Expects 2D!
-    ) -> Float[Tensor, "batch dim"]:
-        return self.linear(x)
-
-projection = SafeProjection(768, 32)
-x = torch.randn(16, 30, 768)  # 3D tensor
-output = projection(x)  # ❌ Raises TypeError immediately!
-# beartype.roar.BeartypeCallHintParamViolation:
-# Expected 2D tensor "batch dim", got 3D tensor with shape (16, 30, 768)
-```
-
-### Common Error Messages
-
-When you see errors like:
-```
-beartype.roar.BeartypeCallHintParamViolation: Forward parameter 'embeddings'
-violates type hint Float[Tensor, "batch dim"], as 3D tensor != 2D tensor
-```
-
-This means:
-- You're passing the wrong tensor shape to a function
-- Check the function signature to see what shape it expects
-- In this situation, you probably need to add an aggregator (e.g., `MeanAggregator`) to turn 3D -> 2D
-
-**Pro tip**: Read the type hints in error messages carefully - they tell you exactly what went wrong!
-
-## Quick Start
-
-**Note**: You will receive a chached vector-datasets from your instructor. These datasets were created using the `build` function (see [Dataset Creation](#dataset-creation) section below), which splits raw data into train/test/validation sets and filters labels based on frequency thresholds.
-
-### 1. Creating Vector Caches
-
-```python
-from pathlib import Path
-from datasets import load_from_disk
-from vectormesh import Vectorizer, VectorCache
-
-# Load your dataset
-dataset = load_from_disk("assets/train")
-
-# Create a vectorizer with a Hugging Face model
-vectorizer = Vectorizer(
-    model_name="Gerwin/legal-bert-dutch-english",
-    col_name="legal_dutch"
-)
-
-# Create and save vector cache
-cache = VectorCache.create(
-    cache_dir=Path("artefacts"),
-    vectorizer=vectorizer,
-    dataset=dataset,
-    dataset_tag="my_dataset"
-)
-```
-
-### 2. Extending Caches with Additional Features
-
-```python
-from vectormesh import RegexVectorizer, VectorCache
-from vectormesh.data.vectorizers import (
-    build_legal_reference_pattern,
-    harmonize_legal_reference
-)
-
-# Create a regex-based vectorizer
-regex_vectorizer = RegexVectorizer(
-    pattern_builder=build_legal_reference_pattern,
-    harmonizer=harmonize_legal_reference,
-    min_doc_frequency=15,
-    max_features=200,
-    training_texts=dataset["text"]
-)
-
-# Extend existing cache with new features
-extended_cache = VectorCache.create(
-    cache_dir=Path("artefacts"),
-    vectorizer=regex_vectorizer,
-    dataset=cache.dataset,
-    dataset_tag="my_dataset"
-)
-```
-
-### 3. Training Models
-
-```python
-import torch
-from torch.utils.data import DataLoader
-from mltrainer import Trainer, TrainerSettings
-from vectormesh.components import (
-    Serial, MeanAggregator, NeuralNet, FixedPadding
-)
-from vectormesh.data import Collate, OneHot
-
-# Load cache
-cache = VectorCache.load(path=Path("artefacts/my_dataset"))
-
-# Prepare data with one-hot labels
-onehot = OneHot(num_classes=32, label_col="labels", target_col="onehot")
-train_data = cache.select(range(1000)).map(onehot)
-
-# Create collate function with padding for the Dataloader
-collate_fn = Collate(
-    embedding_col="legal_dutch",  # pad these embeddings into (batch, chunks, dim)
-    target_col="onehot", # return the one-hot encodes labels
-    padder=FixedPadding(max_chunks=30)  # we use a fixed padding
-)
-
-# Create dataloader
-trainloader = DataLoader(
-    train_data,
-    batch_size=32,
-    shuffle=True,
-    collate_fn=collate_fn
-)
-
-# Build pipeline
-pipeline = Serial([
-    MeanAggregator(),  # (batch, chunks, dim) -> (batch, dim)
-    NeuralNet(hidden_size=768, out_size=32)  # (batch, dim) -> (batch, 32)
-])
-
-# Train
-trainer = Trainer(
-    model=pipeline,
-    settings=settings,  # see notebooks for how to make actual settings
-    loss_fn=torch.nn.BCEWithLogitsLoss(),
-    optimizer=torch.optim.Adam,
-    traindataloader=trainloader,
-    validdataloader=validloader
-)
-trainer.loop()
-```
-
-## Advanced Usage
-
-### Parallel Processing with Multiple Vector Types
-
-Combine embeddings from different sources using parallel pipelines:
-
-```python
-from vectormesh.components import (
-    Parallel, Serial, MeanAggregator, NeuralNet,
-    Concatenate2D, FixedPadding
-)
-from vectormesh.data import CollateParallel
-
-# Create parallel pipeline
-parallel = Parallel([
-    # Branch 1: Process 3D embeddings
-    # (batch, chunks, 768) -> (batch, 32)
-    Serial([
-        MeanAggregator(),
-        NeuralNet(hidden_size=768, out_size=32)
-    ]),
-    # Branch 2: Process regex features
-    # (batch, 123) -> (batch, 32)
-    Serial([
-        NeuralNet(hidden_size=123, out_size=32)
-    ])
-])
-
-# Combine outputs
-pipeline = Serial([
-    parallel,           # ((batch chunks 768) (batch 123)) -> ((batch 32) (batch 32))
-    Concatenate2D(),    # ((batch 32) (batch 32)) -> (batch, 64)
-    NeuralNet(hidden_size=64, out_size=32)  # (batch, 64) -> (batch, 32)
-])
-
-# Use CollateParallel for multiple inputs
-collate_fn = CollateParallel(
-    vec1_col="legal_dutch",
-    vec2_col="regex",
-    target_col="onehot",
-    padder=FixedPadding(max_chunks=30)
-)
-```
-
-### Mixture of Experts (MoE)
-
-See the paper "outrageously large neural networks" in the `references` folder for more details on MoE architectures.
-
-```python
-from vectormesh.components import MeanAggregator, NeuralNet, Serial
-from vectormesh.components.gating import MoE
-
-moe = MoE(
-    # Create MoE with 4 experts
-    experts=[
-        NeuralNet(hidden_size=768, out_size=32),
-        NeuralNet(hidden_size=768, out_size=32),
-        NeuralNet(hidden_size=768, out_size=32),
-        NeuralNet(hidden_size=768, out_size=32),
-    ],
-    hidden_size=768,
-    out_size=32,
-    top_k=2 # but we only use the selected top 2 experts per sample
-)
-
-pipeline = Serial([MeanAggregator(), moe])
-```
-
-### Advanced Aggregation
-
-```python
-from vectormesh.components import AttentionAggregator, RNNAggregator
-
-# Use attention-based aggregation (learnable)
-pipeline = Serial([
-    # (batch chunks dim) -> (batch dim)
-    AttentionAggregator(hidden_size=768),
-    NeuralNet(hidden_size=768, out_size=32)
-])
-
-# Or use RNN-based aggregation
-pipeline = Serial([
-    # (batch chunks dim) -> (batch dim)
-    RNNAggregator(hidden_size=768),
-    NeuralNet(hidden_size=768, out_size=32)
-])
-```
-
-### Skip Connections and Gating
-
-```python
-from vectormesh.components import Skip, Gate, Highway, Projection
-
-# Skip connection with residual learning
-pipeline = Serial([
-    Projection(in_size=64, out_size=32),
-    Skip(
-        transform=NeuralNet(hidden_size=32, out_size=32),
-        in_size=32
-    )
-])
-
-# Simple gating mechanism
-pipeline = Serial([
-    MeanAggregator(),
-    Gate(hidden_size=768),
-    NeuralNet(hidden_size=768, out_size=32)
-])
-
-# put a gate in the skip connection
-pipeline = Serial([
-    Projection(in_size=64, out_size=32),
-    Skip(
-        transform=Serial[
-            NeuralNet(hidden_size=32, out_size=32),
-            Gate(hidden_size=32),
-        ],
-        in_size=32
-    )
-])
-
-# Highway network
-pipeline = Serial([
-    MeanAggregator(),
-    Highway(
-        transform=NeuralNet(hidden_size=768, out_size=768),
-        hidden_size=768
-    ),
-    NeuralNet(hidden_size=768, out_size=32)
-])
-```
-
-For more details on the Highway Network, see the "Highway Networks" paper in the `references` folder.
-
-## Components
-
-### Data Processing
-- `VectorCache`: Efficient storage and retrieval of pre-computed embeddings
-- `Vectorizer`: Hugging Face model-based text vectorization
-- `RegexVectorizer`: Pattern-based feature extraction
-- `LabelEncoder`: Encode categorical labels
-- `OneHot`: One-hot encoding for multi-label classification
-
-### Pipeline Components
-- `Serial`: Sequential processing of components
-- `Parallel`: Parallel processing of multiple input streams
-
-### Aggregation Components
-Reduce 3D tensors (batch, chunks, dim) to 2D tensors (batch, dim):
-- `MeanAggregator`: Average pooling over chunks (no learnable parameters)
-- `AttentionAggregator`: Learnable attention weights over chunks
-- `RNNAggregator`: GRU-based sequential aggregation
-
-### Padding Components
-- `FixedPadding`: Pad sequences to fixed length
-- `DynamicPadding`: Dynamic padding per batch
-
-### Neural Components
-- `NeuralNet`: Multi-layer perceptron with dropout
-- `Projection`: Linear projection layer
-- `Concatenate2D`: Concatenate 2D tensors
-
-### Gating Mechanisms
-Control information flow with learnable gates:
-- `Skip`: Residual skip connection with layer normalization and optional projection
-- `Gate`: Simple multiplicative gating with sigmoid activation
-- `Highway`: Highway network combining transformed and original input
-- `MoE`: Mixture of Experts with top-k routing and optional noisy gating
-
-## Dataset Creation
-
-The datasets you receive were created using the `build` function, which processes raw data and creates train/test/validation splits. Understanding this process helps you work with the data structure:
-
-```python
-from pathlib import Path
-from vectormesh import build
-
-# This is what your instructor used to create the datasets
-build(
-    input_file=Path("assets/data.jsonl"),  # Raw data file
-    threshold=50,                           # Minimum label frequency
-    trainsplit=0.8,                        # 80% for training
-    testvalsplit=0.5,                      # Split remaining 20% equally
-    output_dir=Path("assets/")             # Output directory
-)
-```
-
-The `build` function:
-- Filters out labels that appear less than `threshold` times
-- Splits data into train/test/validation sets according to the specified ratios
-- Saves the splits as Hugging Face datasets in the output directory
-- Ensures balanced representation of labels across splits
-
-## Scripts
-
-The `scripts/` directory contains utilities for data preparation and embedding generation:
-
-- `build_dataset.py`: Creates train/test/validation splits from raw data (instructor use)
-- `create_cache.py`: Creates vector caches for datasets
-- `embed_legal_dutch.py`: Creates embeddings with Dutch legal models
-- `embed_multilegal.py`: Creates embeddings with multilingual legal models
-- `embed_debertav3.py`: Creates embeddings with DeBERTa models
-
-Example usage for creating caches:
-```bash
-python scripts/create_cache.py
-python scripts/embed_legal_dutch.py
-```
+This catches the failure mode that matters most here: `nn.Linear` accepts any leading shape, so
+feeding it `(batch, chunks, dim)` when you meant `(batch, dim)` raises no error — it just trains
+a model that quietly answers the wrong question. A `BeartypeCallHintParamViolation` naming a 3D
+tensor where a 2D one was expected almost always means *a missing aggregator*.
+
+How to read those errors: [Tensor contracts](docs/02-tensor-contracts.md).
 
 ## Notebooks
 
-The `notebooks/` directory contains detailed tutorials:
+| Notebook | Topic |
+|---|---|
+| `0_vectorizer.ipynb` | Creating vector caches; extending one with regex features |
+| `1_training.ipynb` | Cache → padding → aggregation → pipeline → trained model |
+| `2_design.ipynb` | Parallel branches, fusing two representations, skip connections |
+| `3_moe.ipynb` | Mixture of experts |
+| `4_image_vectorizer.ipynb` | The same pipeline on images; feature-space augmentation |
 
-1. **0_vectorizer.ipynb**: Introduction to vectorizers and vector caches
-   - Creating embeddings with Hugging Face models
-   - Extending caches with regex features
-   - Managing vector metadata
+Walkthrough and exercises: [Teaching path](docs/08-teaching-path.md).
 
-2. **1_training.ipynb**: Training models with VectorMesh
-   - Loading vector caches
-   - Creating dataloaders with padding
-   - Building and training pipelines
+## Scripts
 
-3. **2_design.ipynb**: Advanced pipeline architectures
-   - Parallel processing of multiple vector types
-   - Combining embeddings with concatenation
-   - Skip connections and gating mechanisms
+Batch counterparts to the notebooks, for real dataset sizes:
 
-4. **3_moe.ipynb**: Mixture of Experts implementation
-   - MoE architecture and training
-   - Expert selection and gating
-
-## Project Structure
-
-```
-vectormesh/
-├── src/vectormesh/
-│   ├── components/          # Pipeline components
-│   │   ├── aggregation.py   # Pooling operations
-│   │   ├── connectors.py    # Tensor operations
-│   │   ├── gating.py        # Gating mechanisms
-│   │   ├── metrics.py       # Evaluation metrics
-│   │   ├── neural.py        # Neural network layers
-│   │   ├── padding.py       # Sequence padding
-│   │   └── pipelines.py     # Pipeline composition
-│   ├── data/                # Data processing
-│   │   ├── cache.py         # Vector cache management
-│   │   ├── dataset.py       # Dataset utilities
-│   │   └── vectorizers.py   # Vectorization implementations
-│   └── types.py             # Type definitions
-├── scripts/                 # Utility scripts
-├── notebooks/               # Tutorial notebooks
-└── tests/                   # Unit tests
+```bash
+uv run python scripts/create_cache_aktes.py    # embeddings
+uv run python scripts/add_chunked_regex.py     # + chunk-aligned regex column
+uv run python scripts/train_moe_parallel.py    # train
 ```
 
-## Requirements
+Full list: [Training §6.5](docs/06-training.md#65-the-scripts).
 
-- Python >= 3.12
-- PyTorch >= 2.9.1
-- transformers >= 4.57.3
-- sentence-transformers >= 2.0.0
-- datasets >= 4.4.2
-- mltrainer >= 0.2.7
+## Development
 
-See `pyproject.toml` for complete dependencies.
+```bash
+uv run pytest -m "not integration"   # unit tests, no model downloads
+uv run pytest                        # everything, downloads HF models
+uv run ruff check src tests
+uv run ty check
+```
+
+## Project structure
+
+```
+src/vectormesh/
+├── types.py               # VectorMeshError, Cachable, BaseComponent, TensorInput
+├── data/                  # vectorizers, cache, schema, collation
+└── components/            # pipelines, padding, aggregation, neural,
+                           # connectors, gating, augmentation, metrics
+docs/                      # documentation (start at docs/README.md)
+notebooks/                 # tutorials, in order
+scripts/                   # batch pipelines
+references/                # source papers
+tests/
+```
