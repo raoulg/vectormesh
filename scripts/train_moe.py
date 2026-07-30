@@ -60,10 +60,7 @@ if __name__ == "__main__":
 
     hidden_size = 32
     moe = MoE(
-        experts=[
-            TransformerBlock(hidden_size, num_heads=2, output_size=hidden_size)
-            for _ in range(4)
-        ],
+        experts=[TransformerBlock(hidden_size, num_heads=2) for _ in range(4)],
         hidden_size=hidden_size,
         out_size=hidden_size,
     )

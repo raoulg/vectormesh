@@ -72,19 +72,19 @@ class TransformerBlock(BaseComponent):
         x = x + Attention(norm1(x))
         x = x + FFN(norm2(x))
 
-    Keeps ``hidden_size`` unchanged
+    Shape-preserving: both residual additions require the block to return the same
+    width it received, so there is a single ``hidden_size`` and no output size to
+    choose. Put a ``Projection`` before or after the block to change width.
     """
 
     def __init__(
         self,
         hidden_size: int,
-        output_size: int,
         num_heads: int = 8,
         dropout: float = 0.1,
     ):
         super().__init__()
         self.hidden_size = hidden_size
-        self.output_size = output_size
         self.norm1 = nn.LayerNorm(hidden_size)
         self.attn = nn.MultiheadAttention(
             embed_dim=hidden_size,
@@ -93,7 +93,7 @@ class TransformerBlock(BaseComponent):
             batch_first=True,
         )
         self.norm2 = nn.LayerNorm(hidden_size)
-        self.ff = NeuralNet(hidden_size, output_size)
+        self.ff = NeuralNet(hidden_size, hidden_size)
 
     @staticmethod
     def _pad_mask(tensors: Float[Tensor, "batch seq dim"]) -> Bool[Tensor, "batch seq"]:
@@ -109,7 +109,7 @@ class TransformerBlock(BaseComponent):
     @jaxtyped(typechecker=beartype)
     def forward(
         self, tensors: Float[Tensor, "batch seq {self.hidden_size}"]
-    ) -> Float[Tensor, "batch seq {self.output_size}"]:
+    ) -> Float[Tensor, "batch seq {self.hidden_size}"]:
         pad_mask = self._pad_mask(tensors)
 
         normed = self.norm1(tensors)

@@ -98,10 +98,7 @@ if __name__ == "__main__":
     fused_dim = emb_dim + regex_dim
 
     moe = MoE(
-        experts=[
-            TransformerBlock(HIDDEN_SIZE, num_heads=2, output_size=HIDDEN_SIZE)
-            for _ in range(2)
-        ],
+        experts=[TransformerBlock(HIDDEN_SIZE, num_heads=2) for _ in range(2)],
         hidden_size=HIDDEN_SIZE,
         out_size=HIDDEN_SIZE,
     )
@@ -111,7 +108,10 @@ if __name__ == "__main__":
             Concatenate3D(),  # (X1, X2) -> (batch, chunks, emb + regex)
             Projection(fused_dim, HIDDEN_SIZE),  # -> (batch, chunks, hidden)
             moe,  # (batch, chunks, hidden) -> (batch, chunks, hidden)
-            MeanAggregator(),  # ignore padded chunks -> (batch, hidden)
+            # Plain mean, not MaskedMean: the TransformerBlock attends with a padding
+            # mask but still writes non-zero values at padded positions, so the
+            # all-zero signature MaskedMeanAggregator looks for is already gone here.
+            MeanAggregator(),  # (batch, chunks, hidden) -> (batch, hidden)
             torch.nn.Dropout(0.2),
             Projection(HIDDEN_SIZE, NUM_CLASSES),  # -> (batch, 32) logits
         ]
