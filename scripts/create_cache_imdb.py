@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 
-from datasets import Dataset, load_dataset
+from datasets import load_dataset
 from loguru import logger
 
 from vectormesh import VectorCache, Vectorizer
@@ -13,11 +13,10 @@ logger.add("logs/embed_imdb.log", rotation="10 MB", level="DEBUG")
 
 def cache_for_model(model_name: str):
     assets = Path("assets/imdb")
-    dataset = load_dataset("stanfordnlp/imdb", cache_dir=assets)
+    dataset = load_dataset("stanfordnlp/imdb", cache_dir=str(assets))
     tag = model_name.split("/")[-1]
 
     for mode in ["train", "test"]:
-
         vectorizer = Vectorizer(model_name=model_name, col_name=tag, max_length=512)
 
         # data = dataset[mode].select(range(64))
@@ -32,7 +31,10 @@ def cache_for_model(model_name: str):
 
 
 if __name__ == "__main__":
-    models = ["ibm-granite/granite-embedding-small-english-r2", "sentence-transformers/all-MiniLM-L6-v2"]
+    models = [
+        "ibm-granite/granite-embedding-small-english-r2",
+        "sentence-transformers/all-MiniLM-L6-v2",
+    ]
     for model in models:
         logger.info(f"Creating cache for model: {model}")
         cache_for_model(model)
