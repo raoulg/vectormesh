@@ -1,4 +1,5 @@
 import json
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Generic, Optional, TypeVar, get_args, get_type_hints
@@ -49,26 +50,17 @@ class VectorCache(Cachable, Generic[TVectorizer]):
         Returns:
             VectorCache[TVectorizer]
         """
-        from vectormesh import __version__
-
-        vtype = vectorizer.__class__.__name__
-        if column_name is None:
-            if not vectorizer.col_name:
-                raise VectorMeshError(
-                    "column_name must be provided if vectorizer.col_name is not set."
-                )
-            column_name = vectorizer.col_name
+        column_name = cls._resolve_column(vectorizer, column_name)
         logger.info(f"Using embedding column: {column_name}")
-
-        tensord = cls.get_dtensor(vectorizer)
 
         if not cache_dir.exists():
             cache_dir.mkdir(parents=True, exist_ok=True)
             logger.info(f"Created cache directory at {cache_dir}")
 
         if features is None:
-            features = cls.get_features(dataset, tensord, embedding_column=column_name)
-
+            features = cls.get_features(
+                dataset, cls.get_dtensor(vectorizer), embedding_column=column_name
+            )
         # Drop any requested source columns from the output schema so it matches
         # the dataset returned by map(..., remove_columns=...).
         for col in remove_columns or []:
@@ -77,50 +69,21 @@ class VectorCache(Cachable, Generic[TVectorizer]):
         now = datetime.now().strftime("%Y%m%d%H%M%S")
         cachetag = f"{now}_{dataset_tag}_{column_name}"
         filepath = cache_dir / cachetag
-        metadata_path = filepath / "metadata.json"
         logger.info(f"Starting {cachetag}")
 
         try:
-            new_dataset = dataset.map(
-                lambda batch: vectorizer(
-                    batch[vectorizer.input_col], batchsize=vector_batch
-                ),
-                batched=True,
-                batch_size=map_batch,  # Number of documents per batch
-                features=features,
-                remove_columns=remove_columns,
+            new_dataset = cls._vectorize(
+                dataset, vectorizer, features, vector_batch, map_batch, remove_columns
             )
-
-            new_dataset.save_to_disk(filepath)
-            metadata = {
-                f"{column_name}": {
-                    "vectormesh_version": __version__,
-                    "model_tag": vectorizer.model_name,
-                    "vectorizer_type": vtype,
-                    "tensordtype": cls.get_dtensor(vectorizer),
-                    "hidden_size": vectorizer.get_hidden_size,
-                    "context_size": vectorizer.get_context_size,
-                    "stride": getattr(vectorizer, "get_stride", None),
-                    "offsets_supported": getattr(
-                        vectorizer, "get_offsets_supported", None
-                    ),
-                    "chunk_sizes": getattr(vectorizer, "chunk_sizes", None),
-                },
-                "features": list(features.keys()),
-                "created_at": datetime.now().isoformat(),
-                "num_observations": len(new_dataset),
-            }
+            metadata = cls._build_metadata(
+                vectorizer, column_name, features, num_observations=len(new_dataset)
+            )
             # check for existing metadata to update
             metadata = cls.update_metadata(cache_dir / dataset_tag, metadata)
-            with open(metadata_path, "w") as f:
-                json.dump(metadata, f, indent=2)
-            logger.success("Vectorization complete.")
-
+            cls._write(new_dataset, filepath, metadata)
         except Exception as e:
-            if filepath.exists():
-                filepath.unlink()
-            if metadata_path.exists():
-                metadata_path.unlink()
+            # save_to_disk writes a *directory*, so remove the tree (not unlink).
+            shutil.rmtree(filepath, ignore_errors=True)
             raise VectorMeshError(f"Failed to create cache at {filepath}") from e
 
         new_dataset.set_format(type="torch")
@@ -131,6 +94,69 @@ class VectorCache(Cachable, Generic[TVectorizer]):
             dataset=new_dataset,
             metadata=metadata,
         )
+
+    @staticmethod
+    def _resolve_column(vectorizer, column_name: Optional[str]) -> str:
+        """Pick the output column: the explicit override, else vectorizer.col_name."""
+        if column_name is None:
+            if not vectorizer.col_name:
+                raise VectorMeshError(
+                    "column_name must be provided if vectorizer.col_name is not set."
+                )
+            column_name = vectorizer.col_name
+        return column_name
+
+    @staticmethod
+    def _vectorize(
+        dataset: Dataset,
+        vectorizer,
+        features: Features,
+        vector_batch: int,
+        map_batch: int,
+        remove_columns: Optional[list[str]],
+    ) -> Dataset:
+        """Map the vectorizer over the dataset, reading from vectorizer.input_col."""
+        return dataset.map(
+            lambda batch: vectorizer(
+                batch[vectorizer.input_col], batchsize=vector_batch
+            ),
+            batched=True,
+            batch_size=map_batch,  # Number of documents per batch
+            features=features,
+            remove_columns=remove_columns,
+        )
+
+    @classmethod
+    def _build_metadata(
+        cls, vectorizer, column_name: str, features: Features, num_observations: int
+    ) -> dict:
+        """Assemble the metadata dict describing this vectorizer's output column."""
+        from vectormesh import __version__
+
+        return {
+            column_name: {
+                "vectormesh_version": __version__,
+                "model_tag": vectorizer.model_name,
+                "vectorizer_type": vectorizer.__class__.__name__,
+                "tensordtype": cls.get_dtensor(vectorizer),
+                "hidden_size": vectorizer.get_hidden_size,
+                "context_size": vectorizer.get_context_size,
+                "stride": getattr(vectorizer, "get_stride", None),
+                "offsets_supported": getattr(vectorizer, "get_offsets_supported", None),
+                "chunk_sizes": getattr(vectorizer, "chunk_sizes", None),
+            },
+            "features": list(features.keys()),
+            "created_at": datetime.now().isoformat(),
+            "num_observations": num_observations,
+        }
+
+    @staticmethod
+    def _write(new_dataset: Dataset, filepath: Path, metadata: dict) -> None:
+        """Persist the vectorized dataset and its metadata.json to disk."""
+        new_dataset.save_to_disk(filepath)
+        with open(filepath / "metadata.json", "w") as f:
+            json.dump(metadata, f, indent=2)
+        logger.success("Vectorization complete.")
 
     @classmethod
     def load(cls, path: Path) -> "VectorCache[TVectorizer]":
