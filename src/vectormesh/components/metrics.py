@@ -73,7 +73,7 @@ class MASE(Metric):
         return mae / self.scale
 
     def __repr__(self) -> str:
-        return f"MASE(scale={self.scale:.3f})"
+        return f"MASE-scale={self.scale:.3f})"
 
 
 class Accuracy(Metric):
@@ -127,4 +127,4 @@ class F1Score(Metric):
         return f1
 
     def __repr__(self) -> str:
-        return f"F1({self.average})"
+        return f"F1-{self.average}"

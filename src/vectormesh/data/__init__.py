@@ -5,6 +5,7 @@ from .dataset import Collate, CollateParallel, LabelEncoder, OneHot, build
 from .vectorizers import (
     BaseVectorizer,
     ImageVectorizer,
+    ChunkedRegexVectorizer,
     RegexVectorizer,
     Vectorizer,
 )
@@ -20,4 +21,5 @@ __all__ = [
     "Vectorizer",
     "ImageVectorizer",
     "RegexVectorizer",
+    "ChunkedRegexVectorizer",
 ]

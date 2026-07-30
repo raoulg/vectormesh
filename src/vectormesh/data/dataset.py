@@ -1,7 +1,7 @@
 import json
 from collections import Counter
 from pathlib import Path
-from typing import Callable, Dict, List, Set, Tuple
+from typing import Callable, Dict, List, Optional, Set, Tuple
 
 import torch
 from datasets import Dataset
@@ -45,18 +45,27 @@ class CollateParallel(BaseModel):
     """
     processes a batch of Dataset items into padded tensors
     for two separate inputs.
+
+    padder2 is optional. When vec2 is a 1D-per-document vector (e.g. a plain
+    RegexVectorizer) leave it None and the vectors are simply stacked. When vec2 is
+    itself chunked (e.g. ChunkedRegexVectorizer, shape (chunks, dim)), pass a padder
+    so it is padded to the same chunk dimension as vec1 and the two stay aligned.
     """
 
     vec1_col: str
     vec2_col: str
     target_col: str
     padder: Callable
+    padder2: Optional[Callable] = None
 
     def __call__(self, batch):
         embeddings1 = [item[self.vec1_col] for item in batch]
         embeddings2 = [item[self.vec2_col] for item in batch]
         X1 = self.padder(embeddings1)  # this one needs to be padded
-        X2 = torch.stack(embeddings2).float()  # this one doesnt
+        if self.padder2 is not None:
+            X2 = self.padder2(embeddings2)  # chunked vec2: pad to align chunks
+        else:
+            X2 = torch.stack(embeddings2).float()  # 1D vec2: no padding needed
         y = torch.stack([item[self.target_col] for item in batch]).float()
         return (X1, X2), y
 

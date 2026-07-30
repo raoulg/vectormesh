@@ -3,7 +3,7 @@
 import re
 from abc import ABC, abstractmethod
 from collections import Counter
-from typing import Any, Callable, Optional
+from typing import Any, Callable, ClassVar, Optional
 
 import matplotlib.pyplot as plt
 import torch
@@ -113,6 +113,11 @@ class Vectorizer(BaseVectorizer):
     _effective_max_length: int = PrivateAttr()
     chunk_sizes: Counter = Counter()
 
+    # Stride (chunk overlap) is a fixed fraction of the context window. Kept as a
+    # named constant -- and persisted in the cache metadata via `get_stride` -- so a
+    # ChunkedRegexVectorizer can reproduce the exact same chunk boundaries later.
+    STRIDE_DIVISOR: ClassVar[int] = 10
+
     @model_validator(mode="after")
     def initialize_model(self):
         self._metadata = AutoConfig.from_pretrained(self.model_name)
@@ -123,7 +128,7 @@ class Vectorizer(BaseVectorizer):
         self._effective_max_length = (
             min(max_pos, self.max_length) if self.max_length else max_pos
         )
-        self._stride = self._effective_max_length // 10
+        self._stride = self._effective_max_length // self.STRIDE_DIVISOR
 
         logger.info(f"Using device: {self.device}")
         logger.info(
@@ -254,6 +259,10 @@ class Vectorizer(BaseVectorizer):
     @property
     def get_tokenizer(self):
         return self._tokenizer
+
+    @property
+    def get_stride(self) -> int:
+        return self._stride
 
 
 class ImageVectorizer(BaseVectorizer):
@@ -403,6 +412,15 @@ class RegexVectorizer(BaseVectorizer):
         """
         Initialize with compiled pattern.
         """
+        self._init_regex()
+        return self
+
+    def _init_regex(self):
+        """Compile the pattern, set up metadata, and fit if training_texts given.
+
+        Kept separate from the validator so subclasses (e.g. ChunkedRegexVectorizer)
+        can reuse it without invoking a pydantic validator through super().
+        """
         self._pattern_to_idx = {}
         self._compiled_pattern = self.pattern_builder()
         self._match_counts = None
@@ -417,7 +435,6 @@ class RegexVectorizer(BaseVectorizer):
 
         if self.training_texts is not None:
             self.fit(self.training_texts)
-        return self
 
     def _compute_match_counts(self, texts: list[str]) -> tuple[Counter, Counter]:
         match_counts = Counter()
@@ -470,6 +487,23 @@ class RegexVectorizer(BaseVectorizer):
 
         return self
 
+    def _vectorize_text(self, text: str) -> Tensor:
+        """Run the regexes on a single string and return its binary feature vector.
+
+        Operates on whatever string it is given, so it works equally on a whole
+        document (RegexVectorizer) or a single chunk (ChunkedRegexVectorizer).
+        Returns a CPU tensor; callers move it to the device.
+        """
+        vector = torch.zeros(len(self._pattern_to_idx), dtype=torch.float32)
+        doc_patterns = {
+            self.harmonizer(match) for match in self._compiled_pattern.findall(text)
+        }
+        for pattern in doc_patterns:
+            idx = self._pattern_to_idx.get(pattern)
+            if idx is not None:
+                vector[idx] = 1.0
+        return vector
+
     @jaxtyped(typechecker=beartype)
     def __call__(
         self, inputs: list[str], batchsize: int = 32
@@ -479,28 +513,7 @@ class RegexVectorizer(BaseVectorizer):
                 "Vectorizer must be fitted before calling. Run .fit(texts) first."
             )
 
-        vectors = []
-
-        for text in inputs:
-            # Create zero vector
-            vector = torch.zeros(len(self._pattern_to_idx), dtype=torch.float32)
-
-            # Find all matches
-            matches = self._compiled_pattern.findall(text)
-            doc_patterns = set()
-
-            for match in matches:
-                harmonized = self.harmonizer(match)
-                doc_patterns.add(harmonized)
-
-            # Set binary features
-            for pattern in doc_patterns:
-                if pattern in self._pattern_to_idx:
-                    idx = self._pattern_to_idx[pattern]
-                    vector[idx] = 1.0
-
-            vectors.append(vector.to(self.device))
-
+        vectors = [self._vectorize_text(text).to(self.device) for text in inputs]
         return {self.col_name: vectors}
 
     def print_stats(
@@ -543,6 +556,127 @@ class RegexVectorizer(BaseVectorizer):
             }
         )
         return base_metadata
+
+
+class ChunkedRegexVectorizer(RegexVectorizer):
+    """Regex vectorizer that aligns its binary features with an embedder's chunks.
+
+    Where ``RegexVectorizer`` emits one ``(hidden_size,)`` vector per document, this
+    emits a ``(chunks, hidden_size)`` matrix whose rows line up with the chunks an
+    embedding ``Vectorizer`` produces. Chunk ``i`` of the regex matrix then
+    corresponds to chunk ``i`` of the embedding, so the two can be concatenated
+    per chunk downstream.
+
+    Alignment contract: chunking is fully determined by the triple
+    ``(tokenizer_name, context_size, stride)``. Pass the values stored in an
+    embedding cache's metadata (``model_tag``, ``context_size``, ``stride``) and the
+    chunk counts/boundaries are guaranteed identical -- without re-deriving any
+    stride logic. Only the *tokenizer* is loaded (no model weights): chunking
+    happens in token space and is mapped back to character spans via
+    ``offset_mapping`` so the regexes can run on each chunk's raw substring.
+
+    Fast (Rust) tokenizers are required for ``offset_mapping``. If the tokenizer is
+    not fast, we do not crash: we warn, fall back to a single whole-document chunk
+    per text (a ``(1, hidden_size)`` matrix), and record ``offsets_supported=False``
+    in the cache metadata.
+    """
+
+    model_name: str = "chunked_regex_vectorizer"
+    col_name: str = "chunked_regex"
+    tokenizer_name: str = Field(
+        description="HF model tag of the embedder whose chunking we align to"
+    )
+    context_size: int = Field(
+        description="Effective max_length (tokens) used by the embedder"
+    )
+    stride: int = Field(description="Token overlap between consecutive chunks")
+
+    _tokenizer: Any = PrivateAttr()
+    _supports_offsets: bool = PrivateAttr(default=True)
+
+    @model_validator(mode="after")
+    def initialize_model(self):
+        self._init_regex()  # compile pattern + fit if training_texts given
+        self._tokenizer = AutoTokenizer.from_pretrained(self.tokenizer_name)
+        # Report the aligned context window through the BaseVectorizer API.
+        self._effective_max_length = self.context_size
+        # offset_mapping (token chunk -> char span) only exists on fast tokenizers.
+        self._supports_offsets = bool(getattr(self._tokenizer, "is_fast", False))
+        if not self._supports_offsets:
+            logger.warning(
+                f"Tokenizer for '{self.tokenizer_name}' is not a fast tokenizer and "
+                "does not support offset_mapping. Falling back to a single "
+                "whole-document chunk per text: regex features will NOT be "
+                "chunk-aligned (metadata records offsets_supported=False)."
+            )
+        return self
+
+    @property
+    def get_stride(self) -> int:
+        return self.stride
+
+    @property
+    def get_offsets_supported(self) -> bool:
+        return self._supports_offsets
+
+    def _chunk_texts(self, texts: list[str]) -> tuple[list[str], list[int]]:
+        """Recover, for every chunk, the raw character substring of its document.
+
+        Tokenizes with the embedder's exact settings, then uses offset_mapping to
+        slice each chunk back out of the original string. Returns
+        ``(chunk_texts, overflow)`` where ``overflow[i]`` is the source document
+        index of chunk ``i`` (same semantics as ``Vectorizer``'s overflow mapping).
+        """
+        enc = self._tokenizer(
+            texts,
+            truncation=True,
+            max_length=self.context_size,
+            stride=self.stride,
+            return_overflowing_tokens=True,
+            return_offsets_mapping=True,
+            padding=False,
+        )
+        offsets = enc["offset_mapping"]
+        overflow = list(enc["overflow_to_sample_mapping"])
+
+        chunk_texts = []
+        for row, doc_idx in zip(offsets, overflow):
+            # Special/pad tokens carry the offset (0, 0); real tokens carry the
+            # char span they cover in the original document.
+            real = [(s, e) for (s, e) in row if not (s == 0 and e == 0)]
+            if real:
+                start, end = real[0][0], real[-1][1]
+                chunk_texts.append(texts[doc_idx][start:end])
+            else:
+                chunk_texts.append("")
+        return chunk_texts, overflow
+
+    @jaxtyped(typechecker=beartype)
+    def __call__(
+        self, inputs: list[str], batchsize: int = 32
+    ) -> dict[str, list[Float[Tensor, "chunks hidden_size"]]]:
+        if not self._pattern_to_idx:
+            raise RuntimeError(
+                "Vectorizer must be fitted before calling. Run .fit(texts) first."
+            )
+
+        if not self._supports_offsets:
+            # No alignment possible: one whole-document chunk per text, still a 2D
+            # (1, hidden_size) tensor so the cache schema matches the aligned case.
+            out = [
+                self._vectorize_text(text).unsqueeze(0).to(self.device)
+                for text in inputs
+            ]
+            return {self.col_name: out}
+
+        chunk_texts, overflow = self._chunk_texts(inputs)
+        chunk_vecs = [self._vectorize_text(t) for t in chunk_texts]
+
+        out = []
+        for doc_idx in range(len(inputs)):
+            rows = [vec for vec, d in zip(chunk_vecs, overflow) if d == doc_idx]
+            out.append(torch.stack(rows).to(self.device))
+        return {self.col_name: out}
 
 
 def build_legal_reference_pattern() -> re.Pattern:

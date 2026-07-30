@@ -9,6 +9,7 @@ from .aggregation import (
 )
 from .augmentation import GaussianNoise
 from .connectors import Concatenate2D, Stack2D
+from .connectors import Concatenate3D
 from .gating import Gate, Highway, MoE, Skip
 from .neural import Attention, NeuralNet, Projection, TransformerBlock
 from .padding import DynamicPadding, FixedPadding
@@ -22,6 +23,7 @@ __all__ = [
     "RNNAggregator",
     "GaussianNoise",
     "Concatenate2D",
+    "Concatenate3D",
     "Stack2D",
     "Gate",
     "Highway",

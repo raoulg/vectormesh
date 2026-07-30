@@ -100,6 +100,10 @@ class VectorCache(Cachable, Generic[TVectorizer]):
                     "tensordtype": cls.get_dtensor(vectorizer),
                     "hidden_size": vectorizer.get_hidden_size,
                     "context_size": vectorizer.get_context_size,
+                    "stride": getattr(vectorizer, "get_stride", None),
+                    "offsets_supported": getattr(
+                        vectorizer, "get_offsets_supported", None
+                    ),
                     "chunk_sizes": getattr(vectorizer, "chunk_sizes", None),
                 },
                 "features": list(features.keys()),
