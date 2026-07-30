@@ -123,11 +123,9 @@ vector and not the 1000-class head.
 Silence it with `from transformers.utils import logging as hf_logging;
 hf_logging.set_verbosity_error()`.
 
-> **Known rough edge:** `ImageVectorizer.__call__` rebinds its own `inputs` argument to the
-> processor output inside the batching loop. It is correct whenever `batchsize >=
-> len(inputs)` — which is the case for the default `VectorCache.create(vector_batch=32,
-> map_batch=32)` — but calling it directly with a smaller `batchsize` than the input list will
-> misbehave on the second iteration.
+`__call__` chunks its input list into `batchsize`-sized batches, so passing more images than
+`batchsize` is fine: `tests/test_image_vectorizer.py` covers the multi-batch path against a
+stubbed processor/model, without downloading weights.
 
 ---
 

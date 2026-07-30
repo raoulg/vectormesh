@@ -350,9 +350,9 @@ class ImageVectorizer(BaseVectorizer):
         vectors: list[Tensor] = []
         for i in range(0, len(inputs), batchsize):
             batch = [img.convert("RGB") for img in inputs[i : i + batchsize]]
-            inputs = self._processor(batch, return_tensors="pt").to(self.device)
+            processed = self._processor(batch, return_tensors="pt").to(self.device)
             with torch.no_grad():
-                outputs = self._model(**inputs)
+                outputs = self._model(**processed)
             pooled = self._pool(outputs).cpu()
             vectors.extend([vec for vec in pooled])
         return {self.col_name: vectors}
