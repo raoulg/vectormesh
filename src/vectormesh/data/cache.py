@@ -1,5 +1,7 @@
+import hashlib
 import json
 import shutil
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Generic, Optional, TypeVar, get_args, get_type_hints
@@ -106,8 +108,9 @@ class VectorCache(Cachable, Generic[TVectorizer]):
             column_name = vectorizer.col_name
         return column_name
 
-    @staticmethod
+    @classmethod
     def _vectorize(
+        cls,
         dataset: Dataset,
         vectorizer,
         features: Features,
@@ -124,7 +127,63 @@ class VectorCache(Cachable, Generic[TVectorizer]):
             batch_size=map_batch,  # Number of documents per batch
             features=features,
             remove_columns=remove_columns,
+            new_fingerprint=cls._map_fingerprint(
+                dataset, vectorizer, features, vector_batch, map_batch, remove_columns
+            ),
         )
+
+    @staticmethod
+    def _map_fingerprint(
+        dataset: Dataset,
+        vectorizer,
+        features: Features,
+        vector_batch: int,
+        map_batch: int,
+        remove_columns: Optional[list[str]],
+    ) -> str:
+        """Fingerprint the map() above from what actually identifies its output.
+
+        Without an explicit `new_fingerprint`, `datasets` derives one by
+        pickle-hashing the mapped function -- which closes over the vectorizer,
+        i.e. the whole torch model. That is a flat ~21s per create() call,
+        independent of dataset size (measured: 21s for 250 images and for 2000).
+
+        The fingerprint names the on-disk arrow cache file that `map` will reuse,
+        so it must be BOTH deterministic (or nothing is ever reused) AND
+        sensitive to every input that changes the output (or a stale result is
+        served silently). The inputs are: the source data (`dataset._fingerprint`),
+        the transformation (`vectorizer.fingerprint_fields()`, which subclasses
+        extend with their fitted state), the output schema, and the map kwargs.
+        Batch sizes are included because they can affect float accumulation.
+        """
+        from vectormesh import __version__
+
+        dataset_fingerprint = getattr(dataset, "_fingerprint", None)
+        if not dataset_fingerprint:
+            # No identity for the source data means we cannot prove a cached
+            # result belongs to *this* dataset. Fall back to a unique value:
+            # recomputing is wasteful, serving another dataset's vectors is not
+            # recoverable.
+            dataset_fingerprint = f"unknown-{uuid.uuid4().hex}"
+            logger.warning(
+                "Dataset has no _fingerprint; using a random one, so this "
+                "map() result cannot be reused by a later call."
+            )
+
+        payload = {
+            "vectormesh_version": __version__,
+            "dataset": dataset_fingerprint,
+            "vectorizer": vectorizer.fingerprint_fields(),
+            "features": features.to_dict(),
+            "vector_batch": vector_batch,
+            "map_batch": map_batch,
+            "remove_columns": list(remove_columns or []),
+        }
+        # No `default=`: a non-serialisable field must fail loudly here rather
+        # than silently hash to an object repr (which contains a memory address
+        # and would make the fingerprint differ every run).
+        blob = json.dumps(payload, sort_keys=True).encode()
+        return hashlib.sha256(blob).hexdigest()[:32]
 
     @classmethod
     def _build_metadata(

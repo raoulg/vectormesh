@@ -1,5 +1,6 @@
 """Text vectorization components using HuggingFace models."""
 
+import json
 import re
 from abc import ABC, abstractmethod
 from collections import Counter
@@ -15,6 +16,22 @@ from torch import Tensor
 from transformers import AutoConfig, AutoImageProcessor, AutoModel, AutoTokenizer
 
 from vectormesh.types import Cachable
+
+
+def _json_safe(value: Any) -> Any:
+    """Return `value` if it can go into a cache fingerprint, else a type marker.
+
+    A marker is a deliberate dead end: it identifies *that* the field exists
+    without pretending to identify its content, so a subclass that owns such a
+    field has to describe it itself (see `BaseVectorizer.fingerprint_fields`).
+    Falling back to `repr` instead would embed a memory address and make the
+    fingerprint differ on every run.
+    """
+    try:
+        json.dumps(value)
+    except TypeError:
+        return f"<unhashable:{type(value).__name__}>"
+    return value
 
 
 def detect_device() -> str:
@@ -44,6 +61,10 @@ class BaseVectorizer(ABC, Cachable):
     col_name: str
     input_col: str = "text"
     device: str = Field(default_factory=detect_device)
+
+    # Fields excluded from the cache fingerprint because they change while
+    # vectorizing rather than describing what the vectorizer does.
+    FINGERPRINT_EXCLUDE: ClassVar[frozenset[str]] = frozenset()
 
     _metadata: Any = PrivateAttr()
     _effective_max_length: Optional[int] = PrivateAttr(default=None)
@@ -91,6 +112,44 @@ class BaseVectorizer(ABC, Cachable):
             "context_size": self._effective_max_length,
         }
 
+    def fingerprint_fields(self) -> dict:
+        """Everything that identifies the transformation this vectorizer applies.
+
+        The VectorCache hashes this dict to fingerprint its `dataset.map` call
+        instead of letting `datasets` pickle-hash the vectorizer itself (which,
+        for a torch model, costs ~21s per call regardless of dataset size).
+
+        Every public pydantic field is included by default, so a field added
+        later cannot silently go unfingerprinted -- the failure mode of that
+        default is an unnecessary recompute, never a stale cache. Two kinds of
+        field need explicit handling:
+
+        - Fields that are not JSON-serialisable (a `Callable`, say) collapse to a
+          type marker. A subclass owning such a field must override this method
+          and add something that describes it deterministically.
+        - Fields mutated *while vectorizing* (counters, statistics) must be named
+          in `FINGERPRINT_EXCLUDE`, or the fingerprint stops being reproducible.
+
+        Values must also be deterministic across processes: no object reprs, no
+        memory addresses, no unordered sets.
+
+        Model *weights* are identified by `model_name` only; a locally mutated
+        or fine-tuned model reusing the same tag is not distinguishable here.
+        """
+        fields = {
+            name: _json_safe(getattr(self, name))
+            for name in type(self).model_fields
+            if name not in self.FINGERPRINT_EXCLUDE
+        }
+        fields.update(
+            {
+                "class": type(self).__name__,
+                "hidden_size": self.get_hidden_size,
+                "context_size": self.get_context_size,
+            }
+        )
+        return fields
+
     @property
     def get_hidden_size(self) -> int:
         return getattr(self._metadata, "hidden_size")
@@ -117,6 +176,10 @@ class Vectorizer(BaseVectorizer):
     # named constant -- and persisted in the cache metadata via `get_stride` -- so a
     # ChunkedRegexVectorizer can reproduce the exact same chunk boundaries later.
     STRIDE_DIVISOR: ClassVar[int] = 10
+
+    # chunk_sizes is a running tally filled in by extend() during vectorization,
+    # so it says how often this vectorizer has been used, not what it computes.
+    FINGERPRINT_EXCLUDE: ClassVar[frozenset[str]] = frozenset({"chunk_sizes"})
 
     @model_validator(mode="after")
     def initialize_model(self):
@@ -251,6 +314,13 @@ class Vectorizer(BaseVectorizer):
         embedded, attention = self.embed(input_ids, attention, batchsize=batchsize)
         agg = self.aggregate(embedded, attention)
         return self.extend(agg, overflow, num_docs=len(inputs))
+
+    def fingerprint_fields(self) -> dict:
+        # Chunking (stride) changes which text ends up in which chunk, so it
+        # changes the output even when the model and context size are identical.
+        fields = super().fingerprint_fields()
+        fields["stride"] = self._stride
+        return fields
 
     @property
     def get_model(self):
@@ -557,6 +627,38 @@ class RegexVectorizer(BaseVectorizer):
         )
         return base_metadata
 
+    def fingerprint_fields(self) -> dict:
+        """Add the regex and the *fitted* vocabulary to the fingerprint.
+
+        `model_name` is a constant here and `pattern_builder`/`harmonizer` are
+        callables the base class cannot describe, so two RegexVectorizers fitted
+        on different corpora would otherwise look identical to the cache -- and a
+        different fit means different feature columns for the same input text.
+        `__call__` uses exactly the compiled pattern and the pattern->index
+        mapping, so those two pin the output down; `training_texts` is dropped
+        because any corpus producing the same fit produces the same vectors.
+        """
+        fields = super().fingerprint_fields()
+        fields.pop("training_texts", None)
+        fields.update(
+            {
+                "pattern": self._compiled_pattern.pattern,
+                "pattern_flags": int(self._compiled_pattern.flags),
+                # Name only: the qualname is stable across processes where a
+                # function's repr (memory address) is not. The harmonizer's
+                # actual effect on the fitted corpus shows up in fitted_patterns.
+                "harmonizer": getattr(self.harmonizer, "__qualname__", ""),
+                # Sorted by index: this is the exact column layout of the output.
+                "fitted_patterns": [
+                    pattern
+                    for pattern, _ in sorted(
+                        self._pattern_to_idx.items(), key=lambda kv: kv[1]
+                    )
+                ],
+            }
+        )
+        return fields
+
 
 class ChunkedRegexVectorizer(RegexVectorizer):
     """Regex vectorizer that aligns its binary features with an embedder's chunks.
@@ -618,6 +720,14 @@ class ChunkedRegexVectorizer(RegexVectorizer):
     @property
     def get_offsets_supported(self) -> bool:
         return self._supports_offsets
+
+    def fingerprint_fields(self) -> dict:
+        # tokenizer_name/context_size/stride are public fields and come along
+        # automatically; the offsets fallback is private state and emits a
+        # different chunking (one whole-document chunk) entirely.
+        fields = super().fingerprint_fields()
+        fields["offsets_supported"] = self._supports_offsets
+        return fields
 
     def _chunk_texts(self, texts: list[str]) -> tuple[list[str], list[int]]:
         """Recover, for every chunk, the raw character substring of its document.

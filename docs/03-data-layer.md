@@ -36,6 +36,12 @@ Obligations:
 
 Exposed read-only properties: `get_metadata`, `get_hidden_size`, `get_context_size`.
 
+`fingerprint_fields()` describes the vectorizer to the cache (see
+[§3.6](#what-create-does)). It already covers every public field, so most vectorizers need
+nothing; override it when a field is not JSON-serialisable (a `Callable`) or when *private*
+state changes the output, and list fields that mutate during vectorization in
+`FINGERPRINT_EXCLUDE`.
+
 The split between `input_col` and `col_name` is what makes the same cache pipeline work for
 text, images and regex features without any branching in `VectorCache`.
 
@@ -230,6 +236,7 @@ cache = VectorCache.load(path=Path("artefacts/20260605_imdb_granite"))
 | resolve output column | `_resolve_column` | explicit `column_name` wins, else `vectorizer.col_name` |
 | build the on-disk schema | `get_features` + `get_dtensor` | rank read from the `__call__` annotation → `Sequence(Value)` for 1D, `Sequence(Sequence(Value))` for 2D |
 | run the model | `_vectorize` | `dataset.map(..., batched=True)`, reading `vectorizer.input_col` |
+| name the map's cache file | `_map_fingerprint` | hashes dataset fingerprint + `vectorizer.fingerprint_fields()` + schema + batch sizes |
 | assemble metadata | `_build_metadata` | version, model tag, vectorizer class, rank, dims, context/stride, chunk histogram |
 | merge with existing | `update_metadata` | looks in `cache_dir/dataset_tag/metadata.json` and merges — this is how caches *extend* |
 | persist | `_write` | `save_to_disk` + `metadata.json` |
@@ -239,6 +246,20 @@ is re-raised wrapped in `VectorMeshError`.
 
 The output folder is named `{timestamp}_{dataset_tag}_{column_name}`, so successive extensions
 are visible and orderable on disk.
+
+### Why `create` computes its own fingerprint
+
+`datasets.map` normally fingerprints a call by pickle-hashing the mapped function — and that
+function closes over the vectorizer, so hashing it serialises the entire torch model. The cost
+is flat: ~21s per `create`, whether you vectorize 250 images or 2000. Passing an explicit
+`new_fingerprint` skips that hashing and leaves only the real encoder throughput.
+
+The fingerprint names the arrow file `map` reuses, so it has to be deterministic (otherwise
+nothing is ever reused) *and* sensitive to everything that changes the output (otherwise a
+stale result is served silently, which is far worse than a slow one). That is why it is built
+from `vectorizer.fingerprint_fields()` rather than from `model_name` alone: two
+`RegexVectorizer`s fitted on different corpora share a `model_name`, a class and a
+`hidden_size`, but produce different feature columns.
 
 ### Extending a cache
 

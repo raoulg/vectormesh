@@ -54,6 +54,8 @@ Metrics live in `vectormesh.components.metrics` and are **not** in `components._
 
 Properties: `get_metadata -> dict`, `get_hidden_size -> int`, `get_context_size -> int | None`.
 Abstract: `initialize_model()`, `__call__(inputs: list, batchsize: int)`.
+Also: `fingerprint_fields() -> dict` (what the cache hashes; every public field by default,
+minus the names in the `FINGERPRINT_EXCLUDE` class var).
 
 ### `Vectorizer(BaseVectorizer)`
 
