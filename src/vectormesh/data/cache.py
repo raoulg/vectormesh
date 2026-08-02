@@ -5,10 +5,11 @@ import uuid
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
-from typing import Generic, Optional, TypeVar, get_args, get_type_hints
+from typing import Any, Generic, Optional, TypeVar, get_args, get_type_hints
 
 from datasets import Dataset, DatasetDict, Features, Sequence, Value, load_from_disk
 from loguru import logger
+from torch.utils.data import Dataset as TorchDataset
 
 from vectormesh.types import Cachable, VectorMeshError
 
@@ -17,11 +18,15 @@ from .vectorizers import BaseVectorizer
 TVectorizer = TypeVar("TVectorizer", bound=BaseVectorizer)
 
 
-class VectorCache(Cachable, Generic[TVectorizer]):
+class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
+    """A `dataset`-less or `metadata`-less instance is not a usable cache, so both
+    are required rather than Optional -- `create()` and `load()` are the only two
+    constructors and both always supply real values for both fields."""
+
     name: str
     cache_dir: Path
-    dataset: Optional[Dataset] = None
-    metadata: Optional[dict] = None
+    dataset: Dataset
+    metadata: dict
 
     @classmethod
     def create(
@@ -316,8 +321,8 @@ class VectorCache(Cachable, Generic[TVectorizer]):
     def __len__(self) -> int:
         return len(self._ensure_dataset_loaded())
 
-    def __getitem__(self, key):
-        return self._ensure_dataset_loaded()[key]
+    def __getitem__(self, index):
+        return self._ensure_dataset_loaded()[index]
 
     def __getattr__(self, name: str):
         if name.startswith("_"):

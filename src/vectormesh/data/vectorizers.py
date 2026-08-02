@@ -468,8 +468,16 @@ class RegexVectorizer(BaseVectorizer):
     pattern_builder: Callable[[], re.Pattern] = Field(
         description="Function that returns compiled regex pattern"
     )
-    harmonizer: Callable[[tuple], str] = Field(
-        description="Function that harmonizes match groups into canonical form"
+    harmonizer: Callable[[Any], str] = Field(
+        description="Function that harmonizes match groups into canonical form. "
+        "Receives whatever re.findall() produces for the paired pattern_builder: "
+        "a bare str when the pattern has 0-1 groups (e.g. harmonize_imdb_match), "
+        "a tuple when it has 2+ (e.g. harmonize_legal_reference). A Callable's "
+        "parameter type is contravariant, so a Union here would reject *every* "
+        "concrete harmonizer -- each only handles the one shape its own pattern "
+        "produces, never both -- which is exactly what Any is for: this field's "
+        "true input type is a runtime property of the paired pattern, not "
+        "something a static signature can pin down without dependent typing."
     )
 
     _pattern_to_idx: dict[str, int] = PrivateAttr()
