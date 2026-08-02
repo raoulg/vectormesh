@@ -2,6 +2,7 @@
 
 import json
 import re
+from math import isqrt
 from abc import ABC, abstractmethod
 from collections import Counter
 from typing import Any, Callable, ClassVar, Optional
@@ -447,6 +448,113 @@ class ImageVectorizer(BaseVectorizer):
     @property
     def get_processor(self):
         return self._processor
+
+
+class PatchImageVectorizer(ImageVectorizer):
+    """
+    Image vectorizer that **keeps** the patch axis: ``(C, D)`` per image.
+
+    :class:`ImageVectorizer` pools every image down to one vector, which is the
+    right call for classification and is why those caches are small. But pooling
+    is also the step that destroys *where* -- and a per-patch task (segmentation,
+    localisation, dense probing) needs the axis that pooling removes.
+
+    The output shape is the same rung of the tensor ladder as the chunked text
+    vectorizer's, so an image cache built here plugs into ``FixedPadding``, the
+    aggregators and ``Collate`` unchanged. Aggregating ``C`` away afterwards
+    reproduces :class:`ImageVectorizer`; not aggregating is the point.
+
+    Two backends, both handled:
+
+    - ViT-like ``(batch, seq, dim)`` -- the sequence *is* the patch grid, minus
+      any leading summary/CLS token (see ``drop_prefix_tokens``).
+    - CNN-like ``(batch, dim, h, w)`` -- the spatial grid flattened to
+      ``(batch, h*w, dim)``. A CNN carries a grid all the way to its final
+      pooling layer; ``AdaptiveAvgPool2d(1)`` is where it gets thrown away.
+
+    Note this is a *separate class* rather than a ``pool="none"`` flag on
+    :class:`ImageVectorizer`. ``VectorCache`` reads the rank of the cached tensor
+    off the return annotation of ``__call__``, so the declared shape has to match
+    what is actually returned -- a runtime flag would leave the annotation lying
+    and write the wrong ``tensordtype`` into the metadata.
+    """
+
+    col_name: str = "patches"
+    drop_prefix_tokens: Optional[int] = None
+    """How many leading non-patch tokens (CLS, registers) to drop from a ViT's
+    sequence. ``None`` infers it by checking which count leaves a square grid."""
+
+    _grid: Any = PrivateAttr(default=None)
+
+    @jaxtyped(typechecker=beartype)
+    def _patches(self, outputs) -> Float[Tensor, "batch chunks dim"]:
+        hidden = outputs.last_hidden_state
+        if hidden.dim() == 4:  # (b, dim, h, w) -> CNN
+            return hidden.flatten(2).transpose(1, 2)
+        if hidden.dim() == 3:  # (b, seq, dim) -> ViT
+            return hidden[:, self._prefix(hidden.shape[1]) :, :]
+        raise ValueError(
+            f"Cannot take patches from last_hidden_state with {hidden.dim()} dimensions."
+        )
+
+    def _prefix(self, seq_len: int) -> int:
+        """Number of leading tokens that are not patches.
+
+        Inferred rather than assumed: a ViT's patches tile a square grid, so the
+        right answer is the small offset that leaves a perfect square. DINOv2 has
+        one CLS token; a model with register tokens has more; a model with none
+        needs zero, and assuming 1 would silently drop a real patch.
+        """
+        if self.drop_prefix_tokens is not None:
+            return self.drop_prefix_tokens
+        for prefix in range(0, 9):
+            n = seq_len - prefix
+            if n > 0 and isqrt(n) ** 2 == n:
+                return prefix
+        return 0
+
+    def _probe_dim(self) -> int:
+        from PIL import Image
+
+        dummy = Image.new("RGB", (224, 224))
+        inputs = self._processor([dummy], return_tensors="pt").to(self.device)
+        with torch.no_grad():
+            outputs = self._model(**inputs)
+        patches = self._patches(outputs)
+        n = patches.shape[1]
+        side = isqrt(n)
+        self._grid = (side, side) if side * side == n else (1, n)
+        logger.info(f"Patch grid: {self._grid[0]}x{self._grid[1]} ({n} patches)")
+        return int(patches.shape[-1])
+
+    @jaxtyped(typechecker=beartype)
+    def __call__(
+        self, inputs: list, batchsize: int
+    ) -> dict[str, list[Float[Tensor, "chunks dim"]]]:
+        vectors: list[Tensor] = []
+        for i in range(0, len(inputs), batchsize):
+            batch = [img.convert("RGB") for img in inputs[i : i + batchsize]]
+            processed = self._processor(batch, return_tensors="pt").to(self.device)
+            with torch.no_grad():
+                outputs = self._model(**processed)
+            patches = self._patches(outputs).cpu()
+            vectors.extend([p for p in patches])
+        return {self.col_name: vectors}
+
+    @property
+    def get_metadata(self) -> dict:
+        return {
+            "model_name": self.model_name,
+            "col_name": self.col_name,
+            "hidden_size": self._hidden_size,
+            "context_size": self._effective_max_length,
+            "patch_grid": list(self._grid) if self._grid else None,
+        }
+
+    @property
+    def get_grid(self) -> Optional[tuple[int, int]]:
+        """(rows, cols) of the patch grid -- needed to fold ``(C, D)`` back into a map."""
+        return self._grid
 
 
 class RegexVectorizer(BaseVectorizer):

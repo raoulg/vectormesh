@@ -1,12 +1,37 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Iterator, Union
+from typing import Iterable, Iterator, Protocol, Union, runtime_checkable
 
 import numpy as np
 import torch
+from loguru import logger
 
 NumericType = Union[torch.Tensor, np.ndarray]
+
+#: one (x, y) batch, as a DataLoader or a legacy streamer yields it
+Batch = tuple[torch.Tensor, torch.Tensor]
+
+
+@runtime_checkable
+class Streamer(Protocol):
+    """The mltrainer ``BaseDatastreamer`` interface.
+
+    Kept only so metrics fitted on training data can still accept one during the
+    deprecation window; ``stream()`` returns an unbounded generator, which is why
+    callers need ``__len__`` to know when one pass is done.
+
+    .. deprecated:: 0.4.3
+       Removed in 0.5. Pass a ``torch.utils.data.DataLoader`` instead.
+    """
+
+    def __len__(self) -> int: ...
+
+    def stream(self) -> Iterator[Batch]: ...
+
+
+#: what a fitted metric accepts as its training data
+Batches = Union[Iterable[Batch], Streamer]
 
 
 class Metric(ABC):
@@ -50,30 +75,74 @@ class MAE(Metric):
 
 
 class MASE(Metric):
-    def __init__(self, train: Iterator, horizon: int) -> None:
+    """Mean Absolute Scaled Error: MAE divided by a naive forecaster's MAE.
+
+    The scale is fitted once, on training batches, so the metric is comparable
+    across series with different units and does not move when the evaluation
+    split changes.
+
+    ``train`` is any iterable of ``(x, y)`` batches — a ``torch.utils.data.DataLoader``
+    is the expected type. ``x`` may be ``(batch, time)`` or ``(batch, time, 1)``;
+    ``y`` is ``(batch, horizon)``.
+
+    .. deprecated:: 0.4.3
+       Passing an mltrainer ``BaseDatastreamer`` (anything exposing ``.stream()``)
+       still works but logs a warning and will be removed in 0.5. Pass a
+       ``DataLoader`` instead.
+    """
+
+    def __init__(self, train: Batches, horizon: int) -> None:
         self.horizon = horizon
         with torch.no_grad():
             self.scale = self._calculate_scale(train)
 
-    def _calculate_scale(self, train: Iterator) -> torch.Tensor:
-        elist = []
-        streamer = train.stream()  # type: ignore
-        for _ in range(len(train)):  # type: ignore
-            x, y = next(iter(streamer))
-            yhat = self._naive_predict(x)
-            e = torch.mean(torch.abs(y - yhat))
-            elist.append(e)
-        return torch.mean(torch.stack(elist))
+    def _batches(self, train: Batches) -> Iterator[Batch]:
+        """Yield ``(x, y)`` batches from a DataLoader, or from a legacy streamer."""
+        if isinstance(train, Streamer):
+            logger.warning(
+                "MASE received a streamer (an object with .stream()). Support for this "
+                "is deprecated and will be removed in vectormesh 0.5 — pass a "
+                "torch.utils.data.DataLoader instead."
+            )
+            stream = train.stream()
+            for _ in range(len(train)):  # stream() is unbounded; one pass only
+                yield next(stream)
+            return
+        yield from train
+
+    def _calculate_scale(self, train: Batches) -> torch.Tensor:
+        errors = [
+            torch.mean(torch.abs(y - self._naive_predict(x)))
+            for x, y in self._batches(train)
+        ]
+        if not errors:
+            raise ValueError(
+                "MASE needs at least one batch to fit its scale, got none."
+            )
+        scale = torch.mean(torch.stack(errors))
+        if scale == 0:
+            raise ValueError(
+                "MASE scale is zero: the naive forecast is exact on the training data, "
+                "so every scaled error would be infinite."
+            )
+        return scale
 
     def _naive_predict(self, x: torch.Tensor) -> torch.Tensor:
-        return x[..., -self.horizon :, :].squeeze(-1)
+        """Repeat the last ``horizon`` observed steps — the seasonal-naive forecast.
+
+        Accepts ``(batch, time)`` and ``(batch, time, 1)``; the trailing singleton
+        feature axis is dropped so the result lines up with a ``(batch, horizon)``
+        target either way.
+        """
+        naive = x[..., -self.horizon :, :] if x.ndim == 3 else x[..., -self.horizon :]
+        return naive.squeeze(-1) if naive.ndim == 3 and naive.shape[-1] == 1 else naive
 
     def _compute(self, y: torch.Tensor, yhat: torch.Tensor) -> torch.Tensor:
         mae = torch.mean(torch.abs(y - yhat))
         return mae / self.scale
 
     def __repr__(self) -> str:
-        return f"MASE-scale={self.scale:.3f})"
+        return f"MASE(scale={self.scale:.3f})"
 
 
 class Accuracy(Metric):

@@ -6,6 +6,7 @@ from .schema import DatasetSchema
 from .vectorizers import (
     BaseVectorizer,
     ImageVectorizer,
+    PatchImageVectorizer,
     ChunkedRegexVectorizer,
     RegexVectorizer,
     Vectorizer,
@@ -22,6 +23,7 @@ __all__ = [
     "BaseVectorizer",
     "Vectorizer",
     "ImageVectorizer",
+    "PatchImageVectorizer",
     "RegexVectorizer",
     "ChunkedRegexVectorizer",
 ]
