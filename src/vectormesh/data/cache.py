@@ -2,6 +2,7 @@ import hashlib
 import json
 import shutil
 import uuid
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Generic, Optional, TypeVar, get_args, get_type_hints
@@ -78,7 +79,11 @@ class VectorCache(Cachable, Generic[TVectorizer]):
                 dataset, vectorizer, features, vector_batch, map_batch, remove_columns
             )
             metadata = cls._build_metadata(
-                vectorizer, column_name, features, num_observations=len(new_dataset)
+                vectorizer,
+                column_name,
+                features,
+                num_observations=len(new_dataset),
+                dataset=new_dataset,
             )
             # check for existing metadata to update
             metadata = cls.update_metadata(cache_dir / dataset_tag, metadata)
@@ -187,22 +192,42 @@ class VectorCache(Cachable, Generic[TVectorizer]):
 
     @classmethod
     def _build_metadata(
-        cls, vectorizer, column_name: str, features: Features, num_observations: int
+        cls,
+        vectorizer,
+        column_name: str,
+        features: Features,
+        num_observations: int,
+        dataset: Optional[Dataset] = None,
     ) -> dict:
-        """Assemble the metadata dict describing this vectorizer's output column."""
+        """Assemble the metadata dict describing this vectorizer's output column.
+
+        `chunk_sizes` is derived from `dataset[column_name]`'s own row lengths when a
+        rank-2 (chunked) dataset is available, rather than read off
+        `vectorizer.chunk_sizes`. The vectorizer's own counter is a side effect of the
+        mapped function actually running -- `dataset.map()` may instead serve an
+        on-disk result for an identical (dataset, vectorizer) fingerprint (the whole
+        point of `new_fingerprint` above: skip re-embedding, not just re-hashing), and
+        a skipped call means a skipped side effect. The rows themselves are correct
+        either way, so counting them directly is correct either way too.
+        """
         from vectormesh import __version__
+
+        tensordtype = cls.get_dtensor(vectorizer)
+        chunk_sizes = getattr(vectorizer, "chunk_sizes", None)
+        if dataset is not None and tensordtype == 2:
+            chunk_sizes = Counter(len(row) for row in dataset[column_name])
 
         return {
             column_name: {
                 "vectormesh_version": __version__,
                 "model_tag": vectorizer.model_name,
                 "vectorizer_type": vectorizer.__class__.__name__,
-                "tensordtype": cls.get_dtensor(vectorizer),
+                "tensordtype": tensordtype,
                 "hidden_size": vectorizer.get_hidden_size,
                 "context_size": vectorizer.get_context_size,
                 "stride": getattr(vectorizer, "get_stride", None),
                 "offsets_supported": getattr(vectorizer, "get_offsets_supported", None),
-                "chunk_sizes": getattr(vectorizer, "chunk_sizes", None),
+                "chunk_sizes": chunk_sizes,
             },
             "features": list(features.keys()),
             "created_at": datetime.now().isoformat(),

@@ -10,9 +10,10 @@ changes the output (else a stale result is served silently). These tests pin
 down both halves.
 """
 
+from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Optional
+from typing import ClassVar, Optional
 
 import pytest
 import torch
@@ -313,3 +314,77 @@ def test_same_vectorizer_reuses_the_cache_file(tmp_path):
 
     assert calls == [], "second run recomputed instead of reusing the cache file"
     assert first["embed"] == second["embed"]
+
+
+class ChunkedStubVectorizer(BaseVectorizer):
+    """Rank-2 counterpart of StubVectorizer: one chunk per character, so texts of
+    different length produce different, checkable chunk counts.
+
+    `chunk_sizes` mirrors `Vectorizer`'s own field exactly (declared, updated as a
+    side effect of `__call__`, excluded from the fingerprint) so this reproduces the
+    real bug mechanism: a fresh instance that never actually ran leaves it empty.
+    """
+
+    model_name: str = "chunked-stub-model"
+    col_name: str = "embed"
+    input_col: str = "text"
+    device: str = "cpu"
+    chunk_sizes: Counter = Counter()
+
+    FINGERPRINT_EXCLUDE: ClassVar[frozenset[str]] = frozenset({"chunk_sizes"})
+
+    @model_validator(mode="after")
+    def initialize_model(self):
+        self._metadata = SimpleNamespace(hidden_size=STUB_DIM)
+        self._effective_max_length = None
+        return self
+
+    @jaxtyped(typechecker=beartype)
+    def __call__(
+        self, inputs: list, batchsize: int
+    ) -> dict[str, list[Float[torch.Tensor, "chunks dim"]]]:
+        vectors = [torch.ones((len(t), STUB_DIM)) for t in inputs]
+        for v in vectors:
+            self.chunk_sizes[v.shape[0]] += 1
+        return {self.col_name: vectors}
+
+
+def test_chunk_sizes_is_correct_even_on_a_cache_hit(tmp_path):
+    """Regression for vectormesh#2.
+
+    `chunk_sizes` used to be read off `vectorizer.chunk_sizes` -- a side effect of the
+    mapped function actually running. A `dataset.map()` fingerprint hit (the behaviour
+    `test_same_vectorizer_reuses_the_cache_file` locks in, correctly, as a perf win)
+    skips that function entirely, so a *second* `VectorCache.create` over the same
+    (dataset, vectorizer) pair -- even under a different `dataset_tag`, which is not
+    part of the fingerprint -- wrote `chunk_sizes: {}` while `num_observations` stayed
+    correct. Fixed by deriving `chunk_sizes` from the output rows instead.
+    """
+    dataset = saved_dataset(tmp_path / "source")
+    expected = Counter(len(t) for t in TEXTS)
+
+    first = VectorCache.create(
+        cache_dir=tmp_path / "cache_a",
+        vectorizer=ChunkedStubVectorizer(),
+        dataset=dataset,
+        dataset_tag="first",
+        vector_batch=2,
+        map_batch=2,
+    )
+    # a fresh vectorizer instance: chunk_sizes starts empty, and .map() cannot have
+    # anything cached yet for this fingerprint, so this run must genuinely compute.
+    second = VectorCache.create(
+        cache_dir=tmp_path / "cache_b",
+        vectorizer=ChunkedStubVectorizer(),
+        dataset=dataset,
+        dataset_tag="second",
+        vector_batch=2,
+        map_batch=2,
+    )
+
+    assert first.metadata is not None and second.metadata is not None
+    assert dict(first.metadata["embed"]["chunk_sizes"]) == dict(expected)
+    assert dict(second.metadata["embed"]["chunk_sizes"]) == dict(expected), (
+        "second create() over an identical (dataset, vectorizer) pair served a "
+        "cached map() result and chunk_sizes went along for the ride"
+    )
