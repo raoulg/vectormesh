@@ -197,3 +197,61 @@ class F1Score(Metric):
 
     def __repr__(self) -> str:
         return f"F1-{self.average}"
+
+
+class RepresentationStd:
+    """Collapse detector for self-supervised training.
+
+    Objectives that pull two views together all share one trivial solution: emit
+    the same vector for every input. Every view then "agrees" with every other and
+    the loss reaches its minimum -- while the representation has become worthless.
+    The loss curve cannot see this happening. It looks like success.
+
+    What does see it is the spread of the embeddings: normalise to the unit sphere,
+    then take the mean per-dimension standard deviation across a batch.
+
+    ====================  ==============================================
+    value                 meaning
+    ====================  ==============================================
+    ``~0.0``              collapsed -- every input maps to one vector
+    ``~1/sqrt(dim)``      healthy -- the batch is spread over the sphere
+    ====================  ==============================================
+
+    For a 128-dimensional embedding, healthy is about 0.088.
+
+    Deliberately *not* a :class:`Metric` subclass. ``Metric`` is built around a
+    ``(y, yhat)`` pair of tensors and moves both onto a common device, but this is
+    a property of a representation on its own -- and the ``yhat`` handed over by a
+    :class:`~vectormesh.components.pipelines.Siamese` is a nested tuple, not a
+    tensor. It keeps the ``metric(y, yhat) -> float`` signature, so it still drops
+    into a training loop alongside the real metrics.
+
+    Args:
+        index: path to the embedding inside a nested model output. The default
+            reaches into ``((prediction, target), ...)`` for the first prediction,
+            which is what ``Siamese`` returns. Pass ``()`` for a plain tensor.
+    """
+
+    def __init__(self, index: tuple[int, ...] = (0, 0)):
+        self.index = index
+
+    def __repr__(self) -> str:
+        return "repstd"
+
+    def _select(self, yhat) -> torch.Tensor:
+        for i in self.index:
+            yhat = yhat[i]
+        if not isinstance(yhat, torch.Tensor):
+            raise TypeError(
+                f"RepresentationStd(index={self.index}) reached a "
+                f"{type(yhat).__name__}, not a Tensor. Point `index` at the "
+                "embedding inside your model's output."
+            )
+        return yhat
+
+    def __call__(self, y, yhat) -> float:
+        """``y`` is ignored -- self-supervised training has no targets."""
+        z = self._select(yhat).detach()
+        if z.ndim > 2:  # (batch, chunks, dim): every chunk counts as a sample
+            z = z.reshape(-1, z.shape[-1])
+        return float(torch.nn.functional.normalize(z, dim=-1).std(dim=0).mean())

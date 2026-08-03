@@ -13,7 +13,8 @@ from .connectors import Concatenate3D
 from .gating import Gate, Highway, MoE, Skip
 from .neural import Attention, NeuralNet, Projection, TransformerBlock
 from .padding import DynamicPadding, FixedPadding
-from .pipelines import Parallel, Serial
+from .metrics import RepresentationStd
+from .pipelines import Parallel, Serial, Siamese
 
 __all__ = [
     "AttentionAggregator",
@@ -37,4 +38,6 @@ __all__ = [
     "FixedPadding",
     "Parallel",
     "Serial",
+    "Siamese",
+    "RepresentationStd",
 ]
