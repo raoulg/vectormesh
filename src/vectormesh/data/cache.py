@@ -17,6 +17,13 @@ from .vectorizers import BaseVectorizer
 
 TVectorizer = TypeVar("TVectorizer", bound=BaseVectorizer)
 
+# Keys in metadata.json that describe the cache as a whole rather than one column.
+# Module level, not a class attribute: VectorCache is a pydantic model, so a leading
+# underscore would make this a private attribute, and an uninitialised private attribute
+# raises AttributeError -- which `__getattr__` below would then quietly translate into a
+# lookup on the wrapped Dataset, turning a typo into a baffling error message.
+META_NON_COLUMN_KEYS = frozenset({"features", "created_at", "num_observations"})
+
 
 class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
     """A `dataset`-less or `metadata`-less instance is not a usable cache, so both
@@ -273,6 +280,199 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
             dataset=dataset,
             metadata=metadata,
         )
+
+    @classmethod
+    def from_hub(
+        cls,
+        repo_id: str,
+        split: str = "train",
+        revision: Optional[str] = None,
+        token: Optional[str] = None,
+        cache_dir: Optional[Path] = None,
+    ) -> "VectorCache[TVectorizer]":
+        """Download a published cache from the HuggingFace hub and load one split.
+
+        `load()` reads a local directory; this is the hub counterpart, so that consuming
+        a cache someone else published is one call rather than a `snapshot_download`
+        incantation copied between notebooks.
+
+            train = VectorCache.from_hub("pttrn-io/eurosat-dinov2-small")
+            test = VectorCache.from_hub("pttrn-io/eurosat-dinov2-small", split="test")
+
+        Only the requested split is downloaded. These are `save_to_disk` layouts, not
+        parquet, so `datasets.load_dataset()` will not read them and this will.
+
+        Args:
+            repo_id: hub dataset id, e.g. "pttrn-io/dtd-dinov2-small"
+            split: which split folder to fetch. Defaults to "train".
+            revision: pin a specific commit/tag. Recommended for anything reproducible.
+            token: for private repos; falls back to the ambient HF login.
+            cache_dir: override the local huggingface download directory.
+        """
+        from huggingface_hub import snapshot_download
+
+        try:
+            local = Path(
+                snapshot_download(
+                    repo_id,
+                    repo_type="dataset",
+                    revision=revision,
+                    token=token,
+                    cache_dir=str(cache_dir) if cache_dir is not None else None,
+                    allow_patterns=f"{split}/*",
+                )
+            )
+        except Exception as e:
+            raise VectorMeshError(
+                f"Could not download {repo_id!r} from the hub. If the repo is private, "
+                "pass token= or log in with `huggingface-cli login`."
+            ) from e
+
+        path = local / split
+        if not path.exists():
+            raise VectorMeshError(
+                f"{repo_id!r} has no split {split!r}. Available: "
+                f"{cls._hub_splits(repo_id, revision=revision, token=token)}"
+            )
+        return cls.load(path)
+
+    @staticmethod
+    def _hub_splits(
+        repo_id: str, revision: Optional[str] = None, token: Optional[str] = None
+    ) -> list[str]:
+        """Split folders present in a hub cache repo. Error paths only."""
+        try:
+            from huggingface_hub import HfApi
+
+            files = HfApi().list_repo_files(
+                repo_id, repo_type="dataset", revision=revision, token=token
+            )
+            return sorted({f.split("/")[0] for f in files if f.endswith("/state.json")})
+        except Exception:  # pragma: no cover - best-effort hint
+            return []
+
+    @property
+    def vector_columns(self) -> list[str]:
+        """Columns described by metadata.json, i.e. the ones a vectorizer produced."""
+        return [k for k in self.metadata if k not in META_NON_COLUMN_KEYS]
+
+    def join(
+        self,
+        other: "VectorCache",
+        on: str = "source_idx",
+        column: Optional[str] = None,
+        into: Optional[str] = None,
+    ) -> "VectorCache[TVectorizer]":
+        """Bring another cache's vector column onto this one, aligned row-for-row on `on`.
+
+        Two caches built by different encoders over the same source rows are the raw
+        material for a parallel/fusion pipeline, but they arrive as two separate
+        downloads. This aligns them properly instead of trusting that the row orders
+        happen to match:
+
+            dino = VectorCache.from_hub("pttrn-io/dtd-dinov2-small")
+            rn18 = VectorCache.from_hub("pttrn-io/dtd-resnet-18")
+            both = dino.join(rn18)             # -> columns: label, source_idx, embed, embed_resnet-18
+
+            CollateParallel(vec1_col="embed", vec2_col="embed_resnet-18", ...)
+
+        Args:
+            other: the cache to join in.
+            on: key column present in both. "source_idx" is written by the course's
+                build scripts precisely so this is possible.
+            column: which column of `other` to take. Defaults to its single vector
+                column, and raises if there is more than one to choose from.
+            into: name for the joined column. Defaults to `column`, suffixed with
+                `other`'s encoder slug when that would collide with an existing name.
+
+        Raises:
+            VectorMeshError: on a missing key column, duplicate keys, a key-set
+                mismatch, or -- the one that catches a genuinely wrong join -- labels
+                that disagree once the rows have been aligned.
+        """
+        left, right = self.dataset.with_format(None), other.dataset.with_format(None)
+
+        for name, ds in (("this cache", left), ("the other cache", right)):
+            if on not in ds.column_names:
+                raise VectorMeshError(
+                    f"{name} has no column {on!r} to join on (has: {ds.column_names}). "
+                    "Caches built before source_idx existed cannot be aligned safely."
+                )
+
+        column = other._resolve_join_column(column)
+        into = into or (
+            column if column not in left.column_names else f"{column}_{other._slug()}"
+        )
+        if into in left.column_names:
+            raise VectorMeshError(
+                f"column {into!r} already exists in this cache; pass into= to name it."
+            )
+
+        lkeys, rkeys = list(left[on]), list(right[on])
+        if len(set(rkeys)) != len(rkeys):
+            raise VectorMeshError(
+                f"the other cache has duplicate {on!r} values, so the join is ambiguous."
+            )
+        if set(lkeys) != set(rkeys):
+            missing = len(set(lkeys) - set(rkeys))
+            raise VectorMeshError(
+                f"the two caches do not cover the same rows: {len(lkeys)} vs "
+                f"{len(rkeys)} rows, {missing} of this cache's {on!r} values missing "
+                "from the other. Were they built from different splits or subsamples?"
+            )
+
+        position = {key: i for i, key in enumerate(rkeys)}
+        aligned = right.select([position[key] for key in lkeys])
+
+        # The check worth having: if both sides carry labels and they disagree after
+        # alignment, the join is wrong in a way that would otherwise train quietly.
+        for shared in ("label", "labels"):
+            if shared in left.column_names and shared in aligned.column_names:
+                if list(left[shared]) != list(aligned[shared]):
+                    raise VectorMeshError(
+                        f"{shared!r} disagrees between the two caches after aligning on "
+                        f"{on!r}. They are not describing the same rows -- check that "
+                        "both were built from the same source dataset revision."
+                    )
+
+        joined = left.add_column(into, list(aligned[column]))
+        joined.set_format(type="torch")
+
+        metadata = dict(self.metadata)
+        metadata[into] = dict(other.metadata.get(column, {}))
+        metadata["features"] = joined.column_names
+        logger.success(f"joined {into!r} ({len(joined)} rows) on {on!r}")
+
+        return type(self)(
+            name=f"{self.name}+{into}",
+            cache_dir=self.cache_dir,
+            dataset=joined,
+            metadata=metadata,
+        )
+
+    def _resolve_join_column(self, column: Optional[str]) -> str:
+        """Which column of this cache a join should take."""
+        if column is not None:
+            if column not in self.dataset.column_names:
+                raise VectorMeshError(
+                    f"column {column!r} not in {self.dataset.column_names}"
+                )
+            return column
+        candidates = self.vector_columns
+        if len(candidates) != 1:
+            raise VectorMeshError(
+                f"cannot guess which column to join: this cache describes {candidates}. "
+                "Pass column= explicitly."
+            )
+        return candidates[0]
+
+    def _slug(self) -> str:
+        """Short encoder identity for naming a joined column, e.g. "resnet-18"."""
+        for col in self.vector_columns:
+            tag = self.metadata.get(col, {}).get("model_tag")
+            if tag:
+                return str(tag).split("/")[-1]
+        return self.name
 
     @staticmethod
     def update_metadata(path: Path, new_metadata: dict) -> dict:

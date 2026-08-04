@@ -110,6 +110,25 @@ Others are deliberately rank-locked:
 
 - `Gate`, `Highway` — `(batch, dim)` only
 - `Concatenate2D`, `Stack2D` — rank-2 branches only; `Concatenate3D` for rank-3
+
+### A named axis *binds*, including across a variadic tuple
+
+Worth internalising, because it is the one way these annotations can be wrong in a
+direction that rejects valid code rather than accepting invalid code:
+
+```python
+tensors: tuple[Float[Tensor, "batch dim"], ...]   # every branch must have the SAME dim
+tensors: tuple[Float[Tensor, "batch _"], ...]     # branches may differ
+```
+
+`dim` is a name, so jaxtyping binds it on the first element and requires every later one to
+match. `_` is anonymous and binds nothing. `Concatenate2D` shipped with the first form
+until 0.5.0 and therefore refused to concatenate a 384-dim embedding with a 512-dim one —
+the exact operation it exists to perform. `Concatenate3D` uses `_` on its feature axis but
+a named `chunks`, which is right: the widths may differ, the chunk axes may not.
+
+`Stack2D` keeps the named `dim1`, and that is also right — `torch.stack` genuinely requires
+identical shapes, so there the constraint is real rather than accidental.
 - aggregators — rank 3 in, rank 2 out, by definition
 - `Attention`, `TransformerBlock` — rank 3 only (they need a sequence axis)
 

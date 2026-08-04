@@ -145,9 +145,27 @@ VectorCache.create(
 ) -> VectorCache
 
 VectorCache.load(path: Path) -> VectorCache
+
+VectorCache.from_hub(
+    repo_id: str,
+    split: str = "train",
+    revision: str | None = None,
+    token: str | None = None,
+    cache_dir: Path | None = None,
+) -> VectorCache
+
+cache.join(
+    other: VectorCache,
+    on: str = "source_idx",
+    column: str | None = None,     # default: other's single vector column
+    into: str | None = None,       # default: column, suffixed with other's encoder slug
+) -> VectorCache
 ```
 
 Fields: `name: str`, `cache_dir: Path`, `dataset: Dataset | None`, `metadata: dict | None`.
+
+Properties: `vector_columns -> list[str]` — the columns described by `metadata.json`, i.e.
+the ones a vectorizer produced (as opposed to labels, keys and source columns).
 
 Static/class helpers: `update_metadata(path, new_metadata)`,
 `get_features(dataset, tensord, embedding_column)`, `get_dtensor(vectorizer)`.

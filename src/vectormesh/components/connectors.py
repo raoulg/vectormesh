@@ -13,11 +13,18 @@ class Concatenate2D(BaseComponent):
     output: (batch ndim)
 
     where ndim = dim1 + dim2 + ...
+
+    The branch widths do NOT have to match -- fusing a 384-dim image embedding with a
+    512-dim one is the ordinary case. Note the anonymous `_` in the annotation below:
+    a *named* axis binds across a variadic tuple, so `"batch dim"` would silently
+    require every branch to be the same width and reject the very case this component
+    exists for. `Concatenate3D` does the same; `Stack2D` genuinely does need equal
+    widths, because `torch.stack` does, and its named axis is therefore correct.
     """
 
     @jaxtyped(typechecker=beartype)
     def forward(
-        self, tensors: tuple[Float[Tensor, "batch dim"], ...]
+        self, tensors: tuple[Float[Tensor, "batch _"], ...]
     ) -> Float[Tensor, "batch ndim"]:
         return torch.cat(tensors, dim=-1)
 

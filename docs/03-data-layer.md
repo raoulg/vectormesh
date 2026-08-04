@@ -227,7 +227,62 @@ cache = VectorCache.create(
     remove_columns=["image"],     # optional: drop raw pixels from the cache
 )
 cache = VectorCache.load(path=Path("artefacts/20260605_imdb_granite"))
+cache = VectorCache.from_hub("pttrn-io/eurosat-dinov2-small", split="train")
 ```
+
+### Getting a cache someone else built
+
+`load` reads a local directory; `from_hub` is the hub counterpart, and is how every
+consumer of a published cache should start.
+
+```python
+train = VectorCache.from_hub("pttrn-io/eurosat-dinov2-small")
+test  = VectorCache.from_hub("pttrn-io/eurosat-dinov2-small", split="test")
+```
+
+Only the requested split is downloaded. Pass `revision=` to pin a commit for anything that
+has to be reproducible, and `token=` for a private repo.
+
+These folders are a `save_to_disk` layout, not parquet, so `datasets.load_dataset()` will
+**not** read them and `from_hub` will. Asking for a split that does not exist raises with
+the list of splits that do.
+
+### Joining two caches — `join`
+
+Two encoders over the same rows are the raw material for a `Parallel` pipeline, but they
+arrive as two separate downloads. `join` aligns them on an explicit key rather than
+trusting that the row orders happen to agree:
+
+```python
+dino = VectorCache.from_hub("pttrn-io/dtd-dinov2-small")
+rn18 = VectorCache.from_hub("pttrn-io/dtd-resnet-18")
+
+both = dino.join(rn18)          # columns: label, source_idx, embed, embed_resnet-18
+both.vector_columns             # ['embed', 'embed_resnet-18']
+```
+
+The joined column is named after the other cache's encoder when the plain name would
+collide; override with `into=`. Widths need not match — a 384-dim and a 512-dim embedding
+side by side is the ordinary case.
+
+The result is what `CollateParallel` consumes:
+
+```python
+CollateParallel(
+    vec1_col="embed", vec2_col="embed_resnet-18",
+    target_col="onehot", padder=torch.stack,
+)
+```
+
+`join` raises rather than guessing when the alignment cannot be trusted: a missing key
+column, duplicate keys, a key-set mismatch, or — the one that catches a genuinely wrong
+join — **labels that disagree once the rows have been aligned**. That last check is what
+turns "these two caches were built from different revisions" from a model that trains and
+quietly answers the wrong question into an error at load time.
+
+Both caches need the key column. The course build scripts write `source_idx` (the row's
+position in the *source* split) for exactly this reason; caches predating that convention
+cannot be joined safely and say so.
 
 ### What `create` does
 

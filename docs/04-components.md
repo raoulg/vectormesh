@@ -137,7 +137,7 @@ Consume the tuple that a `Parallel` returns; produce a single tensor.
 
 | Class | Input | Output |
 |---|---|---|
-| `Concatenate2D()` | `((B, D1), (B, D2), …)` | `(B, D1+D2+…)` |
+| `Concatenate2D()` | `((B, D1), (B, D2), …)` | `(B, D1+D2+…)` — widths may differ |
 | `Concatenate3D()` | `((B, C, D1), (B, C, D2), …)` | `(B, C, D1+D2+…)` |
 | `Stack2D()` | `((B, D), (B, D), …)` | `(B, n, D)` — a new axis |
 
