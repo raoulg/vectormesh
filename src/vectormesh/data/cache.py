@@ -5,8 +5,18 @@ import uuid
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Generic, Optional, TypeVar, get_args, get_type_hints
+from typing import (
+    Any,
+    Callable,
+    Generic,
+    Optional,
+    TypeVar,
+    Union,
+    get_args,
+    get_type_hints,
+)
 
+import datasets
 from datasets import Dataset, DatasetDict, Features, Sequence, Value, load_from_disk
 from loguru import logger
 from torch.utils.data import Dataset as TorchDataset
@@ -336,6 +346,84 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
             )
         return cls.load(path)
 
+    @classmethod
+    def get_or_create(
+        cls,
+        cache_dir: Path,
+        dataset_tag: str,
+        vectorizer: TVectorizer,
+        dataset: "Union[Dataset, Callable[[], Dataset]]",
+        remove_columns: Optional[list[str]] = None,
+    ) -> "VectorCache[TVectorizer]":
+        """Load the cache for (dataset_tag, this vectorizer's encoder) if one is on
+        disk; build it otherwise.
+
+        A notebook that builds its own cache -- rather than downloading a published
+        one via `from_hub` -- should not re-encode on every rerun, and should not
+        silently serve a *different* encoder's vectors just because they happen to
+        share a `dataset_tag`. This does both: the folder name embeds the encoder
+        identity, and a hit whose stored `model_tag` disagrees with the vectorizer
+        handed in raises rather than being served.
+
+        `dataset` may be a ready `Dataset` or a zero-argument callable that builds one
+        lazily -- a cache hit then costs nothing beyond a glob, which matters when
+        building the dataset itself is not free (e.g. a fresh HF `load_dataset` plus a
+        `.select()`).
+
+        Also disables `datasets`' own `.map()` file-cache for the process (see
+        `_vectorize`'s fingerprint): that cache is keyed independently of `cache_dir`
+        or `dataset_tag`, so a second `create()` over a dataset+vectorizer pair this
+        process has already mapped can silently skip the vectorizer's side effects
+        (`chunk_sizes`) even under a fresh tag. `VectorCache`'s own folder is this
+        course's artefact of record, so disabling the redundant layer costs nothing.
+
+        Raises:
+            VectorMeshError: on a cache hit whose stored `model_tag` disagrees with
+                `vectorizer.model_name` -- a folder from before this convention, or one
+                renamed by hand.
+        """
+        datasets.disable_caching()
+
+        column = vectorizer.col_name
+        tag = f"{dataset_tag}_{cls._model_slug(vectorizer)}"
+        hits = sorted(cache_dir.glob(f"*_{tag}_{column}"))
+        if hits:
+            cache = cls.load(hits[-1])
+            stored = (cache.metadata or {}).get(column, {}).get("model_tag")
+            wanted = getattr(vectorizer, "model_name", None)
+            if stored and wanted and stored != wanted:
+                raise VectorMeshError(
+                    f"{hits[-1]} was built with model_tag={stored!r}, but the "
+                    f"vectorizer handed to get_or_create has model_name={wanted!r}. "
+                    "Delete the stale cache or pick a new dataset_tag rather than "
+                    "silently reusing someone else's encoding."
+                )
+            logger.info(f"found cache: {hits[-1].name}")
+            return cache
+
+        logger.info(f"no cache for {tag}_{column}, building")
+        built = dataset if isinstance(dataset, Dataset) else dataset()
+        return cls.create(
+            cache_dir=cache_dir,
+            vectorizer=vectorizer,
+            dataset=built,
+            dataset_tag=tag,
+            remove_columns=remove_columns,
+        )
+
+    @staticmethod
+    def _model_slug(vectorizer) -> str:
+        """Filesystem-safe encoder identity, e.g. "granite-embedding-small-english-r2".
+
+        `vectorizer.model_name` is the swappable HF id and is what must disambiguate a
+        cache. `ChunkedRegexVectorizer.model_name` defaults to a fixed constant
+        ("chunked_regex_vectorizer") rather than a swappable checkpoint -- correct
+        here, since a regex feature *design* is not an interchangeable "model" the way
+        a pretrained encoder is.
+        """
+        name = getattr(vectorizer, "model_name", None) or vectorizer.__class__.__name__
+        return name.split("/")[-1]
+
     @staticmethod
     def _hub_splits(
         repo_id: str, revision: Optional[str] = None, token: Optional[str] = None
@@ -355,6 +443,46 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
     def vector_columns(self) -> list[str]:
         """Columns described by metadata.json, i.e. the ones a vectorizer produced."""
         return [k for k in self.metadata if k not in META_NON_COLUMN_KEYS]
+
+    @property
+    def num_classes(self) -> int:
+        """Shortcut for `cache.features["label"].num_classes` -- a head's output width.
+
+        Every notebook that trains a classifier re-derives this by hand today. It is a
+        property, not a method, because it costs nothing: `features` is already resident
+        once a cache is loaded.
+        """
+        features = self._ensure_dataset_loaded().features
+        if "label" not in features:
+            raise VectorMeshError(
+                f"no 'label' column in this cache (has: {list(features)}); "
+                ".num_classes only makes sense for a labelled classification cache."
+            )
+        label_feature = features["label"]
+        if not hasattr(label_feature, "num_classes"):
+            raise VectorMeshError(
+                f"'label' is a {type(label_feature).__name__}, not a ClassLabel, so it "
+                "has no num_classes. Read cache.features['label'] directly instead."
+            )
+        return label_feature.num_classes
+
+    @property
+    def dim(self) -> int:
+        """Shortcut for the hidden_size of this cache's one vector column.
+
+        Raises the same way `join()`'s column resolution does once there is more than
+        one vector column (i.e. after a `join()`) -- at that point "the" width is
+        ambiguous and the caller must say which column they mean via
+        `cache.metadata[<col>]["hidden_size"]`.
+        """
+        columns = self.vector_columns
+        if len(columns) != 1:
+            raise VectorMeshError(
+                f"cannot guess which column's width you mean: this cache describes "
+                f"{columns}. Read metadata[<col>]['hidden_size'] explicitly -- likely "
+                "needed after a join()."
+            )
+        return self.metadata[columns[0]]["hidden_size"]
 
     def join(
         self,
