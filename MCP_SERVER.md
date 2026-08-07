@@ -6,28 +6,20 @@ a coding assistant (Claude Code, Cursor, Codex, Claude Desktop, …) — one for
 component or architecture from the library's own principles, and one for **searching** an
 architecture with Ray Tune once there's more than one plausible design.
 
-This is deliberately different from a code-review server. There is nothing to review yet — the
-point is to work *with* an assistant while building something, grounded in *this* library's ideas
-(the tensor-flow ladder, composition over configuration, is a gate worth its parameters) instead
-of generic advice.
+the main idea here is to learn how to work *with* an assistant while building a deep learning architecture, grounded in the vectormesh library's ideas
+(the tensor-flow ladder, composition over configuration, is a gate worth its parameters) instead of generic advice.
 
 ## How to use it
 
 - **Designing something new:** in Claude Code, run `/vectormesh:design` (optionally describe your
   idea). In any client, just say **"Help me design a new vectormesh component using the
-  vectormesh server."** Expect a conversation, not an answer: your assistant will ask you the
-  tensors/enrichments/flows/search-space/search-practices questions one stage at a time and wait
-  for your actual answers before moving on.
+  vectormesh server."** Expect a conversation, not an answer: your assistant will guide you through stages of design asking you questions one stage at a time and wait for your actual answers before moving on.
 - **Searching an architecture:** `/vectormesh:search`, or **"Help me set up a Ray Tune search over
   my architecture using the vectormesh server."**
 - **Looking something up:** "Using the vectormesh server, get the chapter on components." /
-  "Search the vectormesh docs for masked mean." / "What does vectormesh say about chunk
-  alignment?"
+  "Search the vectormesh docs for masked mean." / "What does vectormesh say about chunk alignment?"
 
-The design and search prompts are coaching sessions, not code generators — they're built to ask
-you what you think before offering an answer, and to sketch code only when you ask for it. If
-your assistant tries to answer all five design stages itself in one go, say so — that defeats the
-point; ask it to go back to stage one and actually wait for your answers.
+The design and search prompts are coaching sessions, not code generators — they're built to ask you what you think before offering an answer, and to sketch code only when you ask for it. Using your assistant to answer all five design stages itself in one go defeats the point; ask it to go back to stage one and actually wait for your answers.
 
 ## What it exposes
 
@@ -45,20 +37,13 @@ point; ask it to go back to stage one and actually wait for your answers.
 document dump. It walks a student through five stages **in order**, one at a time, and only
 advances once the assistant reports back what the student actually said:
 
-1. **tensors** — what shape is the data actually in, right now?
-2. **enrichments** — what extra signal could be added before touching architecture (regex
-   features, a second encoder, hand-built signal-processing features for sequential data)?
-3. **flows** — given 1 and 2, which compositions (`Serial`/`Parallel`, gating, fusion point) are
-   even on the table?
-4. **search_space** — of the open questions from 1-3, which are worth turning into a Ray Tune
-   search space?
-5. **search_practices** — how will a search result be trusted, not just read (no-training
-   floor, seed spread, epoch budget, effect size, logging discipline)?
+1. **tensors** — what shape is the data in terms of tensor shapes?
+2. **enrichments** — what extra signal could be added before touching architecture (regex features, a second encoder, hand-built signal-processing features like seasonality of Fourier decomposition for sequential data)?
+3. **flows** — given 1 and 2, which compositions (`Serial`/`Parallel`, gating, fusion point) can you consider?
+4. **search_space** — given the answers from 1-3, what is worth turning into a Ray Tune search space?
+5. **search_practices** — how will a search result be trusted, not just read (baseline model, seed spread, epoch budget, effect size, logging discipline)?
 
-Each stage returns a markdown table — question / why it matters / what a good answer names —
-plus an instruction to the assistant: ask the student, wait for a real answer, don't answer on
-their behalf, and don't fetch the next stage until this one is actually recorded. Progress is
-held in memory for the current session only.
+Each stage returns a markdown table — question / why it matters / what a good answer names — plus an instruction to the assistant: ask the student, wait for a real answer, don't answer on their behalf, and don't fetch the next stage until this one is actually recorded. Progress is held in memory for the current session only.
 
 **Prompts**
 
