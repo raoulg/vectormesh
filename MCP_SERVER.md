@@ -69,14 +69,6 @@ courses built on top of it change.
 - [`uv`](https://docs.astral.sh/uv/)
 - Python 3.10+
 
-The script depends on the standalone [`fastmcp`](https://gofastmcp.com) package (`fastmcp>=2.14.2`
-in its PEP 723 header), not `mcp[cli]`. The official `mcp` SDK vendored a cut-down `FastMCP` at
-`mcp.server.fastmcp` for a while, then removed it entirely in `mcp==2.0.0` (a from-scratch API
-redesign — different transport stack, snake_case fields, `MCPServer` in its place). Depending on
-the real, actively-maintained `fastmcp` project sidesteps that churn: it pins its own compatible
-`mcp` version internally, so this script doesn't need an upper bound of its own and won't need
-touching when the low-level SDK's v2 migration settles.
-
 ## Install
 
 `uv` runs the server straight from a URL: it downloads the single script, provisions Python and
