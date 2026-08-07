@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["mcp[cli]>=1.2.0"]
+# dependencies = ["mcp[cli]>=1.2.0,<2.0.0"]  # mcp 2.0 removed mcp.server.fastmcp; see MCP_SERVER.md
 # ///
 """MCP server that exposes the VectorMesh course as design/search coaching tools.
 
