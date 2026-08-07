@@ -22,6 +22,7 @@ dependencies = [
     "pyvis>=0.3.2",
     "sentence-transformers>=2.0.0",
     "torch>=2.9.1",
+    "torchvision>=0.24.1",
     "tqdm>=4.65.0",
     "transformers>=4.57.3",
 ]
