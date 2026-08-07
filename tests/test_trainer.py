@@ -9,7 +9,9 @@ Covers:
 
 from typing import Any
 
+import pytest
 import torch
+from pydantic import ValidationError
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
@@ -180,8 +182,7 @@ def test_early_stopping_lazy_directory(tmp_path):
 
 
 def test_default_optimizer_kwargs_adds_no_regularisation(tmp_path):
-    """optimizer_kwargs defaults to {} -- Adam gets its own PyTorch defaults
-    (weight_decay=0), not an opinion this library used to bake in silently."""
+    """optimizer_kwargs defaults to {}: Adam gets its own PyTorch defaults."""
     settings = _settings(tmp_path)
     assert settings.optimizer_kwargs == {}
     trainer = _trainer(tmp_path)
@@ -189,3 +190,117 @@ def test_default_optimizer_kwargs_adds_no_regularisation(tmp_path):
     assert (
         trainer.optimizer.defaults["weight_decay"] == 0
     )  # torch.optim.Adam's own default
+
+
+def test_earlystop_kwargs_is_required(tmp_path):
+    """No default: a Trainer must state whether it early-stops."""
+    train_dl, valid_dl = _dataloaders()
+    # built via **kwargs, not literal keywords, so the missing field is a runtime
+    # check (the point of this test) rather than something the type checker would
+    # also flag statically at the call site.
+    kwargs: dict[str, Any] = dict(
+        epochs=2,
+        metrics=[],
+        logdir=tmp_path,
+        train_steps=len(train_dl),
+        valid_steps=len(valid_dl),
+    )
+    with pytest.raises(ValidationError):
+        TrainerSettings(**kwargs)
+
+
+def test_default_step_is_one_forward_pass_per_batch(tmp_path):
+    """No custom step: behaviour is unchanged from before Step existed."""
+    calls: list[int] = []
+    model = nn.Linear(4, 2)
+    model.register_forward_hook(lambda *_: calls.append(1))
+    train_dl, valid_dl = _dataloaders()
+    settings = _settings(tmp_path)
+    trainer = Trainer(
+        model=model,
+        settings=settings,
+        loss_fn=nn.CrossEntropyLoss(),
+        optimizer=torch.optim.Adam,
+        traindataloader=train_dl,
+        validdataloader=valid_dl,
+        progress=False,
+    )
+    calls.clear()
+    trainer.evalbatches()
+    assert len(calls) == len(valid_dl)  # exactly one forward pass per eval batch
+
+
+def test_custom_step_governs_both_train_and_eval_loss(tmp_path):
+    """A custom step replaces the loss computation in trainbatches AND
+    evalbatches -- test_loss, not just train_loss, reflects it."""
+    seen_in_step: list[str] = []
+
+    def doubled_mse(model, x, y):
+        seen_in_step.append("step")
+        yhat = model(x)
+        y_float = torch.nn.functional.one_hot(y, num_classes=2).float()
+        return 2 * torch.nn.functional.mse_loss(yhat, y_float)
+
+    def plain_mse(model, x, y):
+        yhat = model(x)
+        y_float = torch.nn.functional.one_hot(y, num_classes=2).float()
+        return torch.nn.functional.mse_loss(yhat, y_float)
+
+    train_dl, valid_dl = _dataloaders()
+    model_a, model_b = nn.Linear(4, 2), nn.Linear(4, 2)
+    model_b.load_state_dict(model_a.state_dict())  # identical weights
+
+    settings_a = _settings(tmp_path)
+    trainer_a = Trainer(
+        model=model_a,
+        settings=settings_a,
+        loss_fn=nn.MSELoss(),
+        optimizer=torch.optim.Adam,
+        traindataloader=train_dl,
+        validdataloader=valid_dl,
+        step=doubled_mse,
+        progress=False,
+    )
+    settings_b = _settings(tmp_path)
+    trainer_b = Trainer(
+        model=model_b,
+        settings=settings_b,
+        loss_fn=nn.MSELoss(),
+        optimizer=torch.optim.Adam,
+        traindataloader=train_dl,
+        validdataloader=valid_dl,
+        step=plain_mse,
+        progress=False,
+    )
+    assert seen_in_step == []  # nothing ran yet -- both Trainers just constructed
+
+    _, test_loss_a = trainer_a.evalbatches()
+    _, test_loss_b = trainer_b.evalbatches()
+    assert test_loss_a == pytest.approx(2 * test_loss_b)
+
+
+def test_custom_step_with_metrics_pays_a_second_forward_pass(tmp_path):
+    """Metrics need a plain model(x); a custom step doesn't expose its own
+    yhat, so combining the two costs one extra forward pass per eval batch."""
+    calls: list[int] = []
+    model = nn.Linear(4, 2)
+    model.register_forward_hook(lambda *_: calls.append(1))
+
+    def step(model, x, y):
+        return nn.functional.cross_entropy(model(x), y)
+
+    train_dl, valid_dl = _dataloaders()
+    settings = _settings(tmp_path, metrics=[lambda y, yhat: 0.0])
+    trainer = Trainer(
+        model=model,
+        settings=settings,
+        loss_fn=nn.CrossEntropyLoss(),
+        optimizer=torch.optim.Adam,
+        traindataloader=train_dl,
+        validdataloader=valid_dl,
+        step=step,
+        progress=False,
+    )
+    calls.clear()
+    trainer.evalbatches()
+    assert len(calls) == 2 * len(valid_dl)  # step's own call + the metrics call

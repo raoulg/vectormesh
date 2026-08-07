@@ -10,7 +10,7 @@ Signatures as implemented in `src/vectormesh/` (version 0.3.0). `B` = batch, `C`
 ```
 VectorCache, Vectorizer, ImageVectorizer, RegexVectorizer, ChunkedRegexVectorizer,
 BaseVectorizer, LabelEncoder, build, __version__,
-Trainer, TrainerSettings, EarlyStopping, Reporter, TrainResult
+Trainer, TrainerSettings, EarlyStopping, Reporter, Step, TrainResult
 ```
 
 ## 7.2 Data — `from vectormesh.data import ...`
@@ -263,6 +263,7 @@ Trainer(
     scheduler: Callable | None = None,
     device: str | None = None,
     reporters: Sequence[Reporter] = (),
+    step: Step | None = None,
     progress: bool = True,
 )
 Trainer.loop() -> TrainResult
@@ -270,9 +271,10 @@ Trainer.loop() -> TrainResult
 
 | Class | Fields / signature |
 |---|---|
-| `TrainerSettings` (pydantic) | `epochs: int`, `metrics: list[Callable]`, `logdir: Path`, `train_steps: int`, `valid_steps: int`, `optimizer_kwargs: dict`, `scheduler_kwargs: dict \| None`, `earlystop_kwargs: dict \| None`. Plain data — no logging-backend field; see `reporters` above. |
+| `TrainerSettings` (pydantic) | `epochs: int`, `metrics: list[Callable]`, `logdir: Path`, `train_steps: int`, `valid_steps: int`, `optimizer_kwargs: dict = {}`, `scheduler_kwargs: dict \| None = {"factor": 0.1, "patience": 10}`, `earlystop_kwargs: dict \| None` **(required, no default)**. Plain data — no logging-backend field; see `reporters` above. |
 | `TrainResult` (dataclass) | `epoch: int`, `train_loss: float`, `test_loss: float`, `metric_dict: dict[str, float]` — what `.loop()` returns |
 | `Reporter` (`Protocol`) | `__call__(epoch: int, train_loss: float, test_loss: float, metric_dict: dict[str, float]) -> None` — any matching callable qualifies, no subclassing |
+| `Step` (`Protocol`) | `__call__(model: nn.Module, x: BatchTensor, y: torch.Tensor) -> torch.Tensor`. Default (built from `loss_fn`): `lambda model, x, y: loss_fn(model(x), y)`. Governs the loss computation in both `trainbatches()` and `evalbatches()` — see [§6.6](06-training.md#66-step-pluggable-loss-computation). |
 | `EarlyStopping` | `(log_dir: Path, patience=7, verbose=False, delta=0.0, save=False)`; called as `early_stopping(val_loss, model)`; `.get_best() -> nn.Module` |
 
 `Trainer.log_dir` is computed at construction (`logdir / f"{timestamp}-{hex6}"`) but never created

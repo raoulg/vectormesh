@@ -17,6 +17,7 @@ from vectormesh.data import (
 from vectormesh.training import (
     EarlyStopping,
     Reporter,
+    Step,
     Trainer,
     TrainerSettings,
     TrainResult,
@@ -38,6 +39,7 @@ __all__ = [
     "TrainerSettings",
     "EarlyStopping",
     "Reporter",
+    "Step",
     "TrainResult",
 ]
 

@@ -34,11 +34,10 @@ class TrainerSettings(FormattedBase):
     # ReduceLROnPlateau's own PyTorch default, restated as the fallback for when
     # a scheduler is requested but no kwargs were given.
     scheduler_kwargs: dict[str, Any] | None = {"factor": 0.1, "patience": 10}
-    earlystop_kwargs: dict[str, Any] | None = {
-        "save": False,
-        "verbose": True,
-        "patience": 10,
-    }
+    # No default: whether training stops early changes the number you report,
+    # non-obviously, so every Trainer states its choice explicitly. Pass
+    # `None` to train the full epoch count, or a dict of EarlyStopping kwargs.
+    earlystop_kwargs: dict[str, Any] | None
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

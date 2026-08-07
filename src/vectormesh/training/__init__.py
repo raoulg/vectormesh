@@ -7,12 +7,13 @@ carries. See `docs/10-reporters.md` for adapters.
 """
 
 from .settings import TrainerSettings
-from .trainer import EarlyStopping, Reporter, Trainer, TrainResult
+from .trainer import EarlyStopping, Reporter, Step, Trainer, TrainResult
 
 __all__ = [
     "Trainer",
     "TrainerSettings",
     "EarlyStopping",
     "Reporter",
+    "Step",
     "TrainResult",
 ]

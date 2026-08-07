@@ -49,6 +49,29 @@ class Reporter(Protocol):
     ) -> None: ...
 
 
+@runtime_checkable
+class Step(Protocol):
+    """Computes a scalar loss from a model, a batch, and its target.
+
+    Used for both the training step and the validation step, so `test_loss`
+    stays coherent for whatever consumes it downstream -- early stopping, the
+    LR scheduler, every `Reporter`.
+
+    Not given: `Trainer` builds one from `loss_fn` as
+    ``lambda model, x, y: loss_fn(model(x), y)``, exactly today's single
+    forward pass. Override when a loss needs more than one `model(x)` call to
+    make sense -- a contrastive loss run on two augmented views, a VAE
+    combining a reconstruction and a KL term. `metrics` still assume a plain
+    `model(x)` produces a `(y, yhat)` pair worth scoring; pass `metrics=[]`
+    when that is not true for your `step` (a contrastive pair usually has no
+    such pair at all).
+    """
+
+    def __call__(
+        self, model: torch.nn.Module, x: BatchTensor, y: torch.Tensor
+    ) -> torch.Tensor: ...
+
+
 def _timestamped_dir(log_dir: Path | None = None) -> Path:
     """Compute -- but do not create -- a per-run subdirectory path.
 
@@ -92,6 +115,7 @@ class Trainer:
         scheduler: Callable | None = None,
         device: str | None = None,
         reporters: Sequence[Reporter] = (),
+        step: Step | None = None,
         progress: bool = True,
     ) -> None:
         """
@@ -101,6 +125,9 @@ class Trainer:
                 matching that signature works -- see `Reporter`. Empty by
                 default: a bare `Trainer` logs to loguru only and touches no
                 logging framework.
+            step: how to turn a batch into a scalar loss, for both training
+                and validation. Defaults to ``loss_fn(model(x), y)`` -- see
+                `Step`.
             progress: show `tqdm` bars for epochs and training batches. Set to
                 `False` inside a ray trial (or any loop that runs many
                 `Trainer`s back to back) -- ray's own status table already
@@ -114,6 +141,13 @@ class Trainer:
         # (currently: EarlyStopping.save_checkpoint).
         self.log_dir = _timestamped_dir(settings.logdir)
         self.loss_fn = loss_fn
+        # None means "use the default single-forward-pass path" -- kept as its
+        # own flag (rather than always going through self.step) so evalbatches
+        # can still share one model(x) call between the loss and the metrics
+        # in the common case, and only pays for a second forward pass when a
+        # custom step actually needs one.
+        self._custom_step = step
+        self.step: Step = step or (lambda model, x, y: loss_fn(model(x), y))
         self.traindataloader = traindataloader
         self.validdataloader = validdataloader
         self._train_iter: Iterator | None = None
@@ -225,8 +259,7 @@ class Trainer:
             x, y = self._next_batch(self.traindataloader, "_train_iter")
             x, y = self._to_device(x, y)
             self.optimizer.zero_grad()
-            yhat = self.model(x)
-            loss = self.loss_fn(yhat, y)
+            loss = self.step(self.model, x, y)
             loss.backward()
             self.optimizer.step()
             train_loss += float(loss.cpu().detach())
@@ -246,15 +279,23 @@ class Trainer:
                 x, y = self._next_batch(self.validdataloader, "_valid_iter")
                 x, y = self._to_device(x, y)
 
-                # Forward pass
-                yhat = self.model(x)
-
-                # Calculate loss (already handled by loss_fn)
-                test_loss += float(self.loss_fn(yhat, y).cpu())
-
-                # Calculate metrics (now handled by metric classes)
-                for m in self.settings.metrics:
-                    metric_dict[str(m)] = metric_dict.get(str(m), 0.0) + m(y, yhat)
+                if self._custom_step is None:
+                    # one forward pass serves both the loss and the metrics
+                    yhat = self.model(x)
+                    test_loss += float(self.loss_fn(yhat, y).cpu())
+                    for m in self.settings.metrics:
+                        metric_dict[str(m)] = metric_dict.get(str(m), 0.0) + m(y, yhat)
+                else:
+                    test_loss += float(self.step(self.model, x, y).cpu())
+                    if self.settings.metrics:
+                        # a custom step doesn't expose its own yhat, so metrics
+                        # here cost a second forward pass -- only pay it when
+                        # metrics are actually requested alongside a custom step
+                        yhat = self.model(x)
+                        for m in self.settings.metrics:
+                            metric_dict[str(m)] = metric_dict.get(str(m), 0.0) + m(
+                                y, yhat
+                            )
 
         # Average the results
         test_loss /= valid_steps

@@ -49,6 +49,7 @@ settings = TrainerSettings(
     logdir=Path("logs").absolute(),
     train_steps=len(trainloader),
     valid_steps=len(validloader),
+    earlystop_kwargs=None,  # or a dict -- no default, see §6.4
 )
 
 trainer = Trainer(
@@ -115,8 +116,17 @@ settings = TrainerSettings(
 ```
 
 - `train_steps` / `valid_steps` — batches per epoch; use `len(loader)` for a full pass.
-- `earlystop_kwargs` — patience must exceed the scheduler's patience, or you stop before the
-  reduced learning rate has a chance to help. The scripts use 40 vs 20.
+- `earlystop_kwargs` — **required, no default.** Pass `None` to train the full epoch count, or a
+  dict of `EarlyStopping` kwargs. Whether a run stops early changes the number you report,
+  non-obviously enough that `TrainerSettings` won't let you leave it unstated. Patience must exceed
+  the scheduler's patience, or you stop before the reduced learning rate has a chance to help — the
+  scripts use 40 vs 20.
+- `scheduler_kwargs` — only used if `Trainer(..., scheduler=...)` is also passed; defaults to
+  `ReduceLROnPlateau`'s own `{"factor": 0.1, "patience": 10}` if you don't override it. Worth
+  passing explicitly anyway, the same way `earlystop_kwargs` is required — so the value in use is
+  visible in your own code, not hidden behind a default you'd have to go look up.
+- `optimizer_kwargs` — defaults to `{}`: the optimizer class you pass keeps its own defaults
+  (`torch.optim.Adam`: `lr=1e-3`, `weight_decay=0`) unless you override them here.
 - `logdir` — pass an **absolute** path; a relative one resolves against the notebook's cwd. This is
   only ever the *parent* of a run's actual directory — see §6.5 for what `Trainer` does with it.
 - `TrainerSettings` holds only hyperparameters — where to log to is a `Trainer` constructor
@@ -177,7 +187,44 @@ writer.close()
 
 ---
 
-## 6.6 The scripts
+## 6.6 `Step`: pluggable loss computation
+
+Every epoch, `Trainer` turns a batch into a scalar loss twice — once training (with gradients),
+once validating (without). By default that's `loss_fn(model(x), y)`: one forward pass, then
+`loss_fn` scores it. That already covers a compound model output — a Gaussian head returning
+`(mean, sigma)`, say — as long as `loss_fn` unpacks the tuple itself; nothing special needed.
+
+It stops covering the case where the loss needs the model called more than once to mean anything
+— a contrastive loss run on two augmented views, a VAE combining a reconstruction term with a KL
+term. For that, pass `step`:
+
+```python
+class Step(Protocol):
+    def __call__(self, model: nn.Module, x: BatchTensor, y: torch.Tensor) -> torch.Tensor: ...
+```
+
+```python
+def contrastive_step(model, x1, x2):
+    z1, z2 = model(x1), model(x2)
+    return nt_xent_loss(z1, z2)
+
+trainer = Trainer(..., step=contrastive_step)
+```
+
+`step` replaces the loss computation in **both** `trainbatches()` and `evalbatches()`, so
+`test_loss` — and everything downstream of it, early stopping, the LR scheduler, every `Reporter`
+— stays coherent no matter which one is in use.
+
+What `step` does **not** make pluggable is `metrics`: `metric_dict[str(m)] = m(y, yhat)` still
+assumes a plain `model(x)` produces something worth scoring against `y`. A contrastive pair over
+two views usually has no such `yhat` — pass `metrics=[]` in that case. Combining a custom `step`
+with non-empty `metrics` costs a second forward pass (metrics call `model(x)` on their own, since
+a custom `step` doesn't expose whatever it computed internally), and only makes sense when that
+plain forward call is actually meaningful for scoring.
+
+---
+
+## 6.7 The scripts
 
 The `scripts/` folder is the batch counterpart to the notebooks — same pipelines, real dataset
 sizes, no subsampling.
@@ -221,7 +268,7 @@ uv run python scripts/train_moe_parallel.py    # 3. train
 
 ---
 
-## 6.7 Reproducibility checklist
+## 6.8 Reproducibility checklist
 
 Before comparing two runs, confirm they share:
 
@@ -234,7 +281,7 @@ Before comparing two runs, confirm they share:
 
 ---
 
-## 6.8 Tests and tooling
+## 6.9 Tests and tooling
 
 ```bash
 uv sync                              # install
