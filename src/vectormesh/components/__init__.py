@@ -14,7 +14,7 @@ from .gating import Gate, Highway, MoE, Skip, SparseMoE
 from .neural import Attention, NeuralNet, Projection, TransformerBlock
 from .padding import DynamicPadding, FixedPadding
 from .metrics import RepresentationStd
-from .pipelines import Parallel, Serial, Siamese
+from .pipelines import JEPA, Parallel, Serial, Siamese
 
 __all__ = [
     "AttentionAggregator",
@@ -40,5 +40,6 @@ __all__ = [
     "Parallel",
     "Serial",
     "Siamese",
+    "JEPA",
     "RepresentationStd",
 ]
