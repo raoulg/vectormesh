@@ -177,3 +177,15 @@ def test_early_stopping_lazy_directory(tmp_path):
     es.save_checkpoint(0.5, nn.Linear(2, 2))
     assert log_dir.exists()
     assert es.path.exists()
+
+
+def test_default_optimizer_kwargs_adds_no_regularisation(tmp_path):
+    """optimizer_kwargs defaults to {} -- Adam gets its own PyTorch defaults
+    (weight_decay=0), not an opinion this library used to bake in silently."""
+    settings = _settings(tmp_path)
+    assert settings.optimizer_kwargs == {}
+    trainer = _trainer(tmp_path)
+    assert trainer.optimizer.defaults["lr"] == 1e-3  # torch.optim.Adam's own default
+    assert (
+        trainer.optimizer.defaults["weight_decay"] == 0
+    )  # torch.optim.Adam's own default

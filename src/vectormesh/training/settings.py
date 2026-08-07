@@ -28,7 +28,11 @@ class TrainerSettings(FormattedBase):
     logdir: Path
     train_steps: int
     valid_steps: int
-    optimizer_kwargs: dict[str, Any] = {"lr": 1e-3, "weight_decay": 1e-5}
+    # Empty by default: the optimizer class you pass keeps its own defaults
+    # (torch.optim.Adam: lr=1e-3, weight_decay=0) unless overridden here.
+    optimizer_kwargs: dict[str, Any] = {}
+    # ReduceLROnPlateau's own PyTorch default, restated as the fallback for when
+    # a scheduler is requested but no kwargs were given.
     scheduler_kwargs: dict[str, Any] | None = {"factor": 0.1, "patience": 10}
     earlystop_kwargs: dict[str, Any] | None = {
         "save": False,
