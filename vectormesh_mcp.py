@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["mcp[cli]>=1.2.0,<2.0.0"]  # mcp 2.0 removed mcp.server.fastmcp; see MCP_SERVER.md
+# dependencies = ["fastmcp>=2.14.2"]
 # ///
 """MCP server that exposes the VectorMesh course as design/search coaching tools.
 
@@ -39,8 +39,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional
 
-from mcp.server.fastmcp import FastMCP
-from mcp.types import ToolAnnotations
+from fastmcp import FastMCP
 from pydantic import BaseModel, ConfigDict, Field
 
 # --------------------------------------------------------------------------- #
@@ -251,13 +250,13 @@ class SearchInput(BaseModel):
 
 @mcp.tool(
     name="vectormesh_list_concepts",
-    annotations=ToolAnnotations(
-        title="List VectorMesh course chapters",
-        readOnlyHint=True,
-        destructiveHint=False,
-        idempotentHint=True,
-        openWorldHint=False,
-    ),
+    annotations={
+        "title": "List VectorMesh course chapters",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
 )
 async def vectormesh_list_concepts(params: ListConceptsInput) -> str:
     """List the VectorMesh course chapters, in reading order.
@@ -294,13 +293,13 @@ async def vectormesh_list_concepts(params: ListConceptsInput) -> str:
 
 @mcp.tool(
     name="vectormesh_get_concept",
-    annotations=ToolAnnotations(
-        title="Get a VectorMesh course chapter",
-        readOnlyHint=True,
-        destructiveHint=False,
-        idempotentHint=True,
-        openWorldHint=False,
-    ),
+    annotations={
+        "title": "Get a VectorMesh course chapter",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
 )
 async def vectormesh_get_concept(params: GetConceptInput) -> str:
     """Fetch the full markdown of one VectorMesh course chapter.
@@ -331,13 +330,13 @@ async def vectormesh_get_concept(params: GetConceptInput) -> str:
 
 @mcp.tool(
     name="vectormesh_search",
-    annotations=ToolAnnotations(
-        title="Search VectorMesh course chapters",
-        readOnlyHint=True,
-        destructiveHint=False,
-        idempotentHint=True,
-        openWorldHint=False,
-    ),
+    annotations={
+        "title": "Search VectorMesh course chapters",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
 )
 async def vectormesh_search(params: SearchInput) -> str:
     """Search every chapter for keyword(s) and return the best matches.
@@ -751,13 +750,13 @@ class DesignChecklistInput(BaseModel):
 
 @mcp.tool(
     name="vectormesh_design_checklist",
-    annotations=ToolAnnotations(
-        title="Walk through the pre-design checklist with a student, one stage at a time",
-        readOnlyHint=False,
-        destructiveHint=False,
-        idempotentHint=False,
-        openWorldHint=False,
-    ),
+    annotations={
+        "title": "Walk through the pre-design checklist with a student, one stage at a time",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+        "openWorldHint": False,
+    },
 )
 async def vectormesh_design_checklist(params: DesignChecklistInput) -> str:
     """Coach a student through five stages of thinking BEFORE they design anything.
@@ -827,13 +826,13 @@ class SearchMethodInput(BaseModel):
 
 @mcp.tool(
     name="vectormesh_search_method",
-    annotations=ToolAnnotations(
-        title="Get the method for a Ray Tune architecture search",
-        readOnlyHint=True,
-        destructiveHint=False,
-        idempotentHint=True,
-        openWorldHint=False,
-    ),
+    annotations={
+        "title": "Get the method for a Ray Tune architecture search",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
 )
 async def vectormesh_search_method(params: SearchMethodInput) -> str:
     """Return the method for setting up a Ray Tune architecture search over VectorMesh components.

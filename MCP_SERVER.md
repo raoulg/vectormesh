@@ -66,27 +66,30 @@ courses built on top of it change.
 - [`uv`](https://docs.astral.sh/uv/)
 - Python 3.10+
 
-The script pins its own dependency to `mcp[cli]>=1.2.0,<2.0.0` in its PEP 723 header — `mcp` 2.0
-removed `mcp.server.fastmcp` (the API this server is built on) with no deprecation window. If you
-touch that header, keep the upper bound or the zero-clone install will silently break the next
-time someone runs it fresh.
+The script depends on the standalone [`fastmcp`](https://gofastmcp.com) package (`fastmcp>=2.14.2`
+in its PEP 723 header), not `mcp[cli]`. The official `mcp` SDK vendored a cut-down `FastMCP` at
+`mcp.server.fastmcp` for a while, then removed it entirely in `mcp==2.0.0` (a from-scratch API
+redesign — different transport stack, snake_case fields, `MCPServer` in its place). Depending on
+the real, actively-maintained `fastmcp` project sidesteps that churn: it pins its own compatible
+`mcp` version internally, so this script doesn't need an upper bound of its own and won't need
+touching when the low-level SDK's v2 migration settles.
 
 ## Install
 
 `uv` runs the server straight from a URL: it downloads the single script, provisions Python and
-the `mcp` package from the script's own [PEP 723](https://peps.python.org/pep-0723/) metadata, and
-the server fetches its docs from the repo over HTTP.
+the `fastmcp` package from the script's own [PEP 723](https://peps.python.org/pep-0723/) metadata,
+and the server fetches its docs from the repo over HTTP.
 
 You pin a version with `VECTORMESH_REF` — a git ref (branch, tag, or commit). That one variable
 selects both the script (in the URL) and the docs it fetches (inside the script), so a whole
 cohort runs exactly the same thing and the two can't drift apart. The current release is
-**`v0.8.1`** — pin to it so the whole cohort runs the exact same docs; add it with one of the
+**`v0.8.2`** — pin to it so the whole cohort runs the exact same docs; add it with one of the
 following.
 
 ### Claude Code
 
 ```bash
-claude mcp add vectormesh -e VECTORMESH_REF=v0.8.1 -- \
+claude mcp add vectormesh -e VECTORMESH_REF=v0.8.2 -- \
   sh -c 'uv run --no-project https://raw.githubusercontent.com/raoulg/vectormesh/$VECTORMESH_REF/vectormesh_mcp.py'
 ```
 
@@ -100,7 +103,7 @@ Add to `.cursor/mcp.json` (per-project) or `~/.cursor/mcp.json` (global):
     "vectormesh": {
       "command": "sh",
       "args": ["-c", "uv run --no-project https://raw.githubusercontent.com/raoulg/vectormesh/$VECTORMESH_REF/vectormesh_mcp.py"],
-      "env": { "VECTORMESH_REF": "v0.8.1" }
+      "env": { "VECTORMESH_REF": "v0.8.2" }
     }
   }
 }
@@ -114,7 +117,7 @@ Add to `~/.codex/config.toml`:
 [mcp_servers.vectormesh]
 command = "sh"
 args = ["-c", "uv run --no-project https://raw.githubusercontent.com/raoulg/vectormesh/$VECTORMESH_REF/vectormesh_mcp.py"]
-env = { VECTORMESH_REF = "v0.8.1" }
+env = { VECTORMESH_REF = "v0.8.2" }
 ```
 
 ### Claude Desktop
@@ -127,7 +130,7 @@ Add to `claude_desktop_config.json` (Settings → Developer → Edit Config), th
     "vectormesh": {
       "command": "sh",
       "args": ["-c", "uv run --no-project https://raw.githubusercontent.com/raoulg/vectormesh/$VECTORMESH_REF/vectormesh_mcp.py"],
-      "env": { "VECTORMESH_REF": "v0.8.1" }
+      "env": { "VECTORMESH_REF": "v0.8.2" }
     }
   }
 }
@@ -148,7 +151,7 @@ claude mcp add vectormesh -- uv run --no-project /path/to/vectormesh/vectormesh_
 
 ## Tracking the bleeding edge instead
 
-Set `VECTORMESH_REF=main` (in place of `v0.8.1` above) to always run whatever is on `main`,
+Set `VECTORMESH_REF=main` (in place of `v0.8.2` above) to always run whatever is on `main`,
 including chapters or checklist changes not in a release yet. Fine for your own use; for a cohort
 of students, pin to a tag instead so everyone runs the exact same docs during an assignment.
 
@@ -159,11 +162,11 @@ Pick the newest tag from the [releases](https://github.com/raoulg/vectormesh/tag
 automatically — no cache clearing needed.
 
 **Claude Code** — re-running `add` errors if the server already exists, so remove first, then add
-with the new tag (change `v0.8.1` to the target):
+with the new tag (change `v0.8.2` to the target):
 
 ```bash
 claude mcp remove vectormesh -s user
-claude mcp add vectormesh -s user -e VECTORMESH_REF=v0.8.1 -- \
+claude mcp add vectormesh -s user -e VECTORMESH_REF=v0.8.2 -- \
   sh -c 'uv run --no-project https://raw.githubusercontent.com/raoulg/vectormesh/$VECTORMESH_REF/vectormesh_mcp.py'
 ```
 
