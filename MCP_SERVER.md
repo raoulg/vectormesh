@@ -11,6 +11,24 @@ point is to work *with* an assistant while building something, grounded in *this
 (the tensor-flow ladder, composition over configuration, is a gate worth its parameters) instead
 of generic advice.
 
+## How to use it
+
+- **Designing something new:** in Claude Code, run `/vectormesh:design` (optionally describe your
+  idea). In any client, just say **"Help me design a new vectormesh component using the
+  vectormesh server."** Expect a conversation, not an answer: your assistant will ask you the
+  tensors/enrichments/flows/search-space/search-practices questions one stage at a time and wait
+  for your actual answers before moving on.
+- **Searching an architecture:** `/vectormesh:search`, or **"Help me set up a Ray Tune search over
+  my architecture using the vectormesh server."**
+- **Looking something up:** "Using the vectormesh server, get the chapter on components." /
+  "Search the vectormesh docs for masked mean." / "What does vectormesh say about chunk
+  alignment?"
+
+The design and search prompts are coaching sessions, not code generators — they're built to ask
+you what you think before offering an answer, and to sketch code only when you ask for it. If
+your assistant tries to answer all five design stages itself in one go, say so — that defeats the
+point; ask it to go back to stage one and actually wait for your answers.
+
 ## What it exposes
 
 **Tools**
@@ -173,20 +191,3 @@ claude mcp add vectormesh -s user -e VECTORMESH_REF=v0.8.2 -- \
 **Cursor / Codex / Claude Desktop** — edit the `VECTORMESH_REF` value in the config, then restart
 your assistant so it relaunches the server.
 
-## Use it
-
-- **Designing something new:** in Claude Code, run `/vectormesh:design` (optionally describe your
-  idea). In any client, just say **"Help me design a new vectormesh component using the
-  vectormesh server."** Expect a conversation, not an answer: your assistant will ask you the
-  tensors/enrichments/flows/search-space/search-practices questions one stage at a time and wait
-  for your actual answers before moving on.
-- **Searching an architecture:** `/vectormesh:search`, or **"Help me set up a Ray Tune search over
-  my architecture using the vectormesh server."**
-- **Looking something up:** "Using the vectormesh server, get the chapter on components." /
-  "Search the vectormesh docs for masked mean." / "What does vectormesh say about chunk
-  alignment?"
-
-The design and search prompts are coaching sessions, not code generators — they're built to ask
-you what you think before offering an answer, and to sketch code only when you ask for it. If
-your assistant tries to answer all five design stages itself in one go, say so — that defeats the
-point; ask it to go back to stage one and actually wait for your answers.
