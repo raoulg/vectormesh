@@ -28,6 +28,7 @@ afternoon.
 | 6 | [Training](06-training.md) | Metrics, loss choice, `mltrainer` wiring, the batch scripts |
 | 7 | [API reference](07-api-reference.md) | Compact signature tables for everything exported |
 | 8 | [Teaching path](08-teaching-path.md) | Notebook-by-notebook course map, the questions each one is meant to provoke |
+| 9 | [Architecture search](09-architecture-search.md) | Searching architectures with Ray Tune instead of guessing them: baselines, search spaces, reading results |
 
 If you are **starting out**: read [Core concepts](01-core-concepts.md), then run
 `notebooks/1_training.ipynb`, then keep [Components](04-components.md) open as a lookup table.
@@ -37,6 +38,9 @@ contract you are publishing.
 
 If you are **extending the library**: [Tensor contracts](02-tensor-contracts.md) and
 [The data layer](03-data-layer.md) describe the two invariants that everything else relies on.
+
+If you have **more than one plausible design and no principled way to pick**:
+[Architecture search](09-architecture-search.md) turns that into a search instead of a guess.
 
 ---
 

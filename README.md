@@ -1,5 +1,9 @@
 # VectorMesh
 
+> 🤖 **Use this course from your coding assistant.** These docs, plus a design-from-principles
+> coach and a Ray Tune search coach, are also available as an MCP server, so tools like Claude
+> Code, Cursor, or Claude Desktop can query them directly. See [MCP_SERVER.md](MCP_SERVER.md).
+
 A PyTorch framework for **embed once, reuse many times**.
 
 A large pretrained encoder — a BERT-family text model, a vision CNN/ViT, or a hand-written regex
@@ -26,6 +30,7 @@ Full documentation is in **[`docs/`](docs/README.md)**.
 | [Training](docs/06-training.md) | Metrics, loss choice, `mltrainer` wiring, the batch scripts |
 | [API reference](docs/07-api-reference.md) | Signature tables for everything exported |
 | [Teaching path](docs/08-teaching-path.md) | Notebook-by-notebook map and the questions each one raises |
+| [Architecture search](docs/09-architecture-search.md) | Searching architectures with Ray Tune instead of guessing them |
 
 ## Installation
 
