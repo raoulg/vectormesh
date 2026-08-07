@@ -15,9 +15,9 @@ from vectormesh.components import (
 )
 import torch
 import torch.optim as optim
-from mltrainer import ReportTypes, Trainer, TrainerSettings
 
 from vectormesh.components.metrics import F1Score
+from vectormesh.training import Trainer, TrainerSettings
 from vectormesh.data.vectorizers import detect_device
 from loguru import logger
 
@@ -85,7 +85,6 @@ if __name__ == "__main__":
         logdir=log_dir,
         train_steps=len(trainloader),
         valid_steps=len(validloader),
-        reporttypes=[ReportTypes.TENSORBOARD, ReportTypes.TOML],
         earlystop_kwargs={"save": True, "verbose": True, "patience": 20},
         scheduler_kwargs={"factor": 0.5, "patience": 10},
     )
@@ -103,4 +102,22 @@ if __name__ == "__main__":
         scheduler=optim.lr_scheduler.ReduceLROnPlateau,
         device=device,
     )
+
+    # TensorBoard is not a vectormesh dependency -- wiring it in is this one
+    # closure, added after construction so it can point at the exact run
+    # directory Trainer already computed (trainer.log_dir). Same pattern for
+    # mlflow/ray/wandb: see docs/10-reporters.md.
+    from torch.utils.tensorboard.writer import SummaryWriter
+
+    writer = SummaryWriter(log_dir=trainer.log_dir)
+
+    def to_tensorboard(epoch, train_loss, test_loss, metric_dict):
+        writer.add_scalar("Loss/train", train_loss, epoch)
+        writer.add_scalar("Loss/test", test_loss, epoch)
+        for name, value in metric_dict.items():
+            writer.add_scalar(f"metric/{name}", value, epoch)
+
+    trainer.reporters.append(to_tensorboard)
+
     trainer.loop()
+    writer.close()

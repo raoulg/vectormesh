@@ -27,10 +27,11 @@ Full documentation is in **[`docs/`](docs/README.md)**.
 | [The data layer](docs/03-data-layer.md) | Vectorizers, `VectorCache`, metadata, `DatasetSchema`, collation |
 | [Components](docs/04-components.md) | Every building block, with shapes and when to reach for it |
 | [Architectures](docs/05-architectures.md) | Composition patterns from a two-line baseline to chunk-level MoE fusion |
-| [Training](docs/06-training.md) | Metrics, loss choice, `mltrainer` wiring, the batch scripts |
+| [Training](docs/06-training.md) | Metrics, loss choice, `vectormesh.training.Trainer` wiring, the batch scripts |
 | [API reference](docs/07-api-reference.md) | Signature tables for everything exported |
 | [Teaching path](docs/08-teaching-path.md) | Notebook-by-notebook map and the questions each one raises |
 | [Architecture search](docs/09-architecture-search.md) | Searching architectures with Ray Tune instead of guessing them |
+| [Reporters cookbook](docs/10-reporters.md) | mlflow/ray/TensorBoard adapters — none of them a vectormesh dependency |
 
 ## Installation
 
@@ -75,7 +76,7 @@ pipeline = Serial([
 ])
 ```
 
-Then hand `pipeline` and `loader` to `mltrainer.Trainer` — see
+Then hand `pipeline` and `loader` to `vectormesh.training.Trainer` — see
 [Training](docs/06-training.md) for the full wiring.
 
 Building a cache instead of loading one, extending a cache with extra feature columns, and the

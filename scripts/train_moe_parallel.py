@@ -16,7 +16,6 @@ from pathlib import Path
 import torch
 import torch.optim as optim
 from loguru import logger
-from mltrainer import ReportTypes, Trainer, TrainerSettings
 from torch.utils.data import DataLoader
 
 from vectormesh.components import (
@@ -32,6 +31,7 @@ from vectormesh.components.metrics import F1Score
 from vectormesh.data import CollateParallel, OneHot
 from vectormesh.data.cache import VectorCache
 from vectormesh.data.vectorizers import detect_device
+from vectormesh.training import Trainer, TrainerSettings
 
 EMB_COL = "legal_dutch"
 REGEX_COL = "chunked_regex"
@@ -126,7 +126,6 @@ if __name__ == "__main__":
         logdir=log_dir,
         train_steps=len(trainloader),
         valid_steps=len(validloader),
-        reporttypes=[ReportTypes.TENSORBOARD, ReportTypes.TOML],
         earlystop_kwargs={"save": True, "verbose": True, "patience": 40},
         scheduler_kwargs={"factor": 0.5, "patience": 20},
     )

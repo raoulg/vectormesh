@@ -113,9 +113,17 @@ Two things worth naming explicitly:
 
 A Ray trial runs in its **own process**. Nothing from your notebook's memory is visible inside
 it — the trainable function must build everything itself, from the cache load down to the
-optimizer:
+optimizer.
+
+The trainable function can use `Trainer` directly rather than hand-rolling the loop: `log_dir` is
+computed but never created on disk unless something actually writes to it, and `progress=False`
+drops the `tqdm` bars, which is what makes constructing dozens of `Trainer`s in a row — one per
+trial — cheap:
 
 ```python
+from pathlib import Path
+
+import torch
 from ray import tune
 from ray.tune.search.hyperopt import HyperOptSearch
 from torch import nn
@@ -123,7 +131,9 @@ from torch.utils.data import DataLoader
 
 from vectormesh import VectorCache
 from vectormesh.components import Gate, Highway, MaskedMeanAggregator, MoE, NeuralNet, Serial
+from vectormesh.components.metrics import Accuracy
 from vectormesh.data import Collate, OneHot
+from vectormesh.training import Trainer, TrainerSettings
 
 MECHANISMS = {
     "plain": lambda dim, cfg: nn.Identity(),
@@ -151,35 +161,27 @@ def trainable(config: dict) -> None:
     ])
 
     torch.manual_seed(0)
-    opt = torch.optim.Adam(model.parameters(), lr=config["lr"])
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, factor=0.5, patience=5)
-    loss_fn = nn.CrossEntropyLoss()
-
-    best_acc, patience, bad_epochs = 0.0, 15, 0
-    for _ in range(config["epochs"]):  # epochs is a CEILING; the loop below decides when to stop
-        model.train()
-        for X, y in tr:
-            opt.zero_grad()
-            loss_fn(model(X), y).backward()
-            opt.step()
-
-        model.eval()
-        correct = total = 0
-        with torch.no_grad():
-            for X, y in te:
-                correct += int((model(X).argmax(1) == y.argmax(1)).sum())
-                total += len(y)
-        acc = correct / total
-        scheduler.step(acc)
-
-        if acc > best_acc:
-            best_acc, bad_epochs = acc, 0
-        else:
-            bad_epochs += 1
-        if bad_epochs >= patience:  # plateaued — stop spending this trial's compute
-            break
-
-    tune.report({"accuracy": best_acc})
+    settings = TrainerSettings(
+        epochs=config["epochs"],  # a ceiling -- early stopping below decides the real length
+        metrics=[Accuracy()],
+        logdir=Path("ray_results/trials").absolute(),  # never created unless save=True fires
+        train_steps=len(tr),
+        valid_steps=len(te),
+        scheduler_kwargs={"factor": 0.5, "patience": 5},
+        earlystop_kwargs={"save": False, "verbose": False, "patience": 15},
+    )
+    trainer = Trainer(
+        model=model,
+        settings=settings,
+        loss_fn=nn.CrossEntropyLoss(),
+        optimizer=torch.optim.Adam,
+        traindataloader=tr,
+        validdataloader=te,
+        scheduler=torch.optim.lr_scheduler.ReduceLROnPlateau,
+        progress=False,  # ray's own status table already shows progress across trials
+    )
+    result = trainer.loop()
+    tune.report({"accuracy": result.metric_dict["Accuracy"]})
 
 
 tuner = tune.Tuner(
@@ -193,6 +195,11 @@ tuner = tune.Tuner(
 results = tuner.fit()
 ```
 
+Worth knowing: `EarlyStopping` tracks *validation loss*, not the metric you report to ray
+(`accuracy` here). For a classification head with `CrossEntropyLoss` the two move together
+closely enough that this rarely changes which trial wins, but if your task's loss and headline
+metric can diverge, keep that in mind when reading a search's stopping points.
+
 The mechanism axis reads directly from `vectormesh.components.gating` — `Skip → Gate → Highway →
 MoE` is exactly the ladder of increasingly expressive conditional computation from
 [Core concepts §1.6](01-core-concepts.md#16-composition-over-configuration) and
@@ -201,13 +208,17 @@ MoE` is exactly the ladder of increasingly expressive conditional computation fr
 
 **On the epoch budget:** set `epochs` in the search space to a generous *ceiling* (large enough
 that no config would plausibly still be improving at that point), and let the
-`ReduceLROnPlateau` scheduler plus the patience-based break above decide the *actual* stopping
-point per trial. A fixed, guessed epoch count silently under-trains some configs and over-trains
-others — and that difference then looks like an architecture effect when it is really a training-
-budget artefact. `docs/06-training.md §6.4` documents the same `scheduler` +
-`earlystop_kwargs` pattern for `mltrainer.Trainer`, including the gotcha that the early-stop
-patience must exceed the scheduler's patience, or you stop before a reduced learning rate gets a
-chance to help.
+`ReduceLROnPlateau` scheduler plus `earlystop_kwargs` decide the *actual* stopping point per
+trial. A fixed, guessed epoch count silently under-trains some configs and over-trains others —
+and that difference then looks like an architecture effect when it is really a training-budget
+artefact. [`docs/06-training.md §6.4`](06-training.md#64-trainersettings-worth-knowing) covers
+the same pattern: early-stop patience must exceed the scheduler's patience, or you stop before a
+reduced learning rate gets a chance to help.
+
+Need per-epoch reporting instead — for an ASHA-style scheduler that prunes trials on intermediate
+values, rather than reading `epochs` off the whole trial's end? Pass a `reporters=[...]` callable
+straight into the `Trainer(...)` call above; see
+[§10.2](10-reporters.md#102-ray-tune).
 
 ## 9.6 Reading a search one axis at a time
 
@@ -267,7 +278,9 @@ with mlflow.start_run(run_name="mechanism_search"):
 ```
 
 This is the same "log everything" habit as the rest of the course, applied at the granularity
-that is actually safe: per-search, not per-trial.
+that is actually safe: per-search, not per-trial. `mlflow` is not a `vectormesh` dependency —
+this is a plain script-level call, same as every other backend in the
+[reporters cookbook](10-reporters.md).
 
 ## 9.9 A `uv run` gotcha worth knowing
 

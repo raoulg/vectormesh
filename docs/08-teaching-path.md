@@ -52,7 +52,7 @@ subsampled to 1024 rows for speed.
 - Loss/metric choice for a multi-label problem: `BCEWithLogitsLoss` + `F1Score`.
 
 **Code exercised:** `VectorCache.load`, `FixedPadding`, `MaskedMeanAggregator`, `Serial`,
-`NeuralNet`, `OneHot`, `Collate`, `F1Score`, `mltrainer.Trainer`.
+`NeuralNet`, `OneHot`, `Collate`, `F1Score`, `vectormesh.training.Trainer`.
 
 **The question the notebook asks explicitly**
 

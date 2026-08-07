@@ -1,8 +1,8 @@
 # 6. Training
 
-VectorMesh does not implement a training loop — it uses [`mltrainer`](https://pypi.org/project/mltrainer/).
-The library's job is to hand `mltrainer` a model, a dataloader and a metric that all agree about
-shapes.
+`Trainer` lives in `vectormesh.training`. It depends on nothing but `torch`, `pydantic`, `loguru`
+and `tqdm` — no mlflow, ray, or tensorboard import anywhere in the package. Logging to any of
+those is opt-in, wired up by you — see [§6.5](#65-reporters-logging-without-a-framework-dependency).
 
 ---
 
@@ -13,7 +13,6 @@ from pathlib import Path
 
 import torch
 import torch.optim as optim
-from mltrainer import ReportTypes, Trainer, TrainerSettings
 from torch.utils.data import DataLoader
 
 from vectormesh.components import FixedPadding, MaskedMeanAggregator, NeuralNet, Serial
@@ -21,6 +20,7 @@ from vectormesh.components.metrics import F1Score
 from vectormesh.data import Collate, OneHot
 from vectormesh.data.cache import VectorCache
 from vectormesh.data.vectorizers import detect_device
+from vectormesh.training import Trainer, TrainerSettings
 
 # 1. data
 traincache = VectorCache.load(path=trainpath)
@@ -49,7 +49,6 @@ settings = TrainerSettings(
     logdir=Path("logs").absolute(),
     train_steps=len(trainloader),
     valid_steps=len(validloader),
-    reporttypes=[ReportTypes.TENSORBOARD, ReportTypes.TOML],
 )
 
 trainer = Trainer(
@@ -62,11 +61,15 @@ trainer = Trainer(
     scheduler=optim.lr_scheduler.ReduceLROnPlateau,
     device=detect_device(),
 )
-trainer.loop()
+result = trainer.loop()  # TrainResult(epoch, train_loss, test_loss, metric_dict)
 ```
 
 `detect_device()` (from `vectormesh.data.vectorizers`) returns `cuda` → `mps` → `cpu` in order of
 availability. For a head this small, `cpu` is often competitive — the data is already vectors.
+
+`trainer.loop()` returns a `TrainResult` with the final epoch's `train_loss`, `test_loss` and
+`metric_dict`, which is what lets a ray trial call `Trainer` directly and read its result off the
+return value; see [§9](09-architecture-search.md).
 
 ---
 
@@ -106,27 +109,75 @@ settings = TrainerSettings(
     logdir=Path("logs/MoE_parallel").absolute(),
     train_steps=len(trainloader),
     valid_steps=len(validloader),
-    reporttypes=[ReportTypes.TENSORBOARD, ReportTypes.TOML],
     earlystop_kwargs={"save": True, "verbose": True, "patience": 40},
     scheduler_kwargs={"factor": 0.5, "patience": 20},
 )
 ```
 
 - `train_steps` / `valid_steps` — batches per epoch; use `len(loader)` for a full pass.
-- `reporttypes` — `TENSORBOARD` for curves, `TOML` for a machine-readable record of the run.
 - `earlystop_kwargs` — patience must exceed the scheduler's patience, or you stop before the
   reduced learning rate has a chance to help. The scripts use 40 vs 20.
-- `logdir` — pass an **absolute** path; a relative one resolves against the notebook's cwd.
-
-Watch curves with:
-
-```bash
-uv run tensorboard --logdir logs
-```
+- `logdir` — pass an **absolute** path; a relative one resolves against the notebook's cwd. This is
+  only ever the *parent* of a run's actual directory — see §6.5 for what `Trainer` does with it.
+- `TrainerSettings` holds only hyperparameters — where to log to is a `Trainer` constructor
+  argument instead (§6.5), because a logging backend is a runtime choice with its own optional
+  dependency, not a hyperparameter.
 
 ---
 
-## 6.5 The scripts
+## 6.5 Reporters: logging without a framework dependency
+
+`vectormesh.training` imports nothing but `torch`, `pydantic`, `loguru` and `tqdm` — no `mlflow`,
+no `ray`, no `tensorboard`. Every epoch, `Trainer.report()` always logs a line via `loguru`; on
+top of that it calls every callable in `reporters`, in order:
+
+```python
+class Reporter(Protocol):
+    def __call__(self, epoch: int, train_loss: float, test_loss: float,
+                 metric_dict: dict[str, float]) -> None: ...
+```
+
+`Reporter` is a `typing.Protocol`, not a base class — nothing to subclass, nothing to import from
+vectormesh. A bare function with that signature already qualifies:
+
+```python
+def to_ray(epoch, train_loss, test_loss, metric_dict):
+    from ray import tune
+    tune.report({"train_loss": train_loss, "test_loss": test_loss, **metric_dict})
+
+trainer = Trainer(..., reporters=[to_ray])
+```
+
+Constructing a `Trainer` computes its run directory (`trainer.log_dir`) without creating it on
+disk — nothing is written until something actually needs to (currently only
+`EarlyStopping.save_checkpoint`, when `earlystop_kwargs={"save": True, ...}`). That means a
+reporter that needs a real path — TensorBoard's `SummaryWriter`, for instance — can be built
+*after* construction, pointed at the exact directory the run will use, and appended to
+`trainer.reporters` (a plain list) before calling `.loop()`:
+
+```python
+from torch.utils.tensorboard.writer import SummaryWriter
+
+trainer = Trainer(model=pipeline, settings=settings, ...)
+writer = SummaryWriter(log_dir=trainer.log_dir)
+trainer.reporters.append(
+    lambda epoch, train_loss, test_loss, metric_dict: (
+        writer.add_scalar("Loss/train", train_loss, epoch),
+        writer.add_scalar("Loss/test", test_loss, epoch),
+        *(writer.add_scalar(f"metric/{k}", v, epoch) for k, v in metric_dict.items()),
+    )
+)
+trainer.loop()
+writer.close()
+```
+
+`scripts/train_moe.py` does exactly this. Copy-paste adapters for mlflow, ray and a plain webhook
+— none of them shipped as vectormesh code — are in
+[10. Reporters cookbook](10-reporters.md).
+
+---
+
+## 6.6 The scripts
 
 The `scripts/` folder is the batch counterpart to the notebooks — same pipelines, real dataset
 sizes, no subsampling.
@@ -170,7 +221,7 @@ uv run python scripts/train_moe_parallel.py    # 3. train
 
 ---
 
-## 6.6 Reproducibility checklist
+## 6.7 Reproducibility checklist
 
 Before comparing two runs, confirm they share:
 
@@ -183,7 +234,7 @@ Before comparing two runs, confirm they share:
 
 ---
 
-## 6.7 Tests and tooling
+## 6.8 Tests and tooling
 
 ```bash
 uv sync                              # install

@@ -25,10 +25,11 @@ afternoon.
 | 3 | [The data layer](03-data-layer.md) | Vectorizers, `VectorCache`, metadata, `DatasetSchema`, `OneHot`/`Collate` |
 | 4 | [Components](04-components.md) | Every building block: padding, aggregation, neural, connectors, gating, augmentation |
 | 5 | [Architectures](05-architectures.md) | Composing the blocks: serial, parallel fusion, skip/highway, MoE, chunk-aligned fusion |
-| 6 | [Training](06-training.md) | Metrics, loss choice, `mltrainer` wiring, the batch scripts |
+| 6 | [Training](06-training.md) | Metrics, loss choice, `vectormesh.training.Trainer` wiring, the batch scripts |
 | 7 | [API reference](07-api-reference.md) | Compact signature tables for everything exported |
 | 8 | [Teaching path](08-teaching-path.md) | Notebook-by-notebook course map, the questions each one is meant to provoke |
 | 9 | [Architecture search](09-architecture-search.md) | Searching architectures with Ray Tune instead of guessing them: baselines, search spaces, reading results |
+| 10 | [Reporters cookbook](10-reporters.md) | mlflow/ray/TensorBoard/webhook adapters for `Trainer`'s `Reporter` hook — none of them a vectormesh dependency |
 
 If you are **starting out**: read [Core concepts](01-core-concepts.md), then run
 `notebooks/1_training.ipynb`, then keep [Components](04-components.md) open as a lookup table.

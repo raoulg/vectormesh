@@ -9,7 +9,8 @@ Signatures as implemented in `src/vectormesh/` (version 0.3.0). `B` = batch, `C`
 
 ```
 VectorCache, Vectorizer, ImageVectorizer, RegexVectorizer, ChunkedRegexVectorizer,
-BaseVectorizer, LabelEncoder, build, __version__
+BaseVectorizer, LabelEncoder, build, __version__,
+Trainer, TrainerSettings, EarlyStopping, Reporter, TrainResult
 ```
 
 ## 7.2 Data — `from vectormesh.data import ...`
@@ -249,7 +250,38 @@ All are called as `metric(y, yhat)` with `torch.Tensor` or `np.ndarray`, and ret
 
 ---
 
-## 7.10 Easily-confused signatures
+## 7.10 Training — `from vectormesh.training import ...` (also top-level)
+
+```python
+Trainer(
+    model: nn.Module,
+    settings: TrainerSettings,
+    loss_fn: Callable,
+    optimizer: type[Optimizer],
+    traindataloader: Iterable,
+    validdataloader: Iterable,
+    scheduler: Callable | None = None,
+    device: str | None = None,
+    reporters: Sequence[Reporter] = (),
+    progress: bool = True,
+)
+Trainer.loop() -> TrainResult
+```
+
+| Class | Fields / signature |
+|---|---|
+| `TrainerSettings` (pydantic) | `epochs: int`, `metrics: list[Callable]`, `logdir: Path`, `train_steps: int`, `valid_steps: int`, `optimizer_kwargs: dict`, `scheduler_kwargs: dict \| None`, `earlystop_kwargs: dict \| None`. Plain data — no logging-backend field; see `reporters` above. |
+| `TrainResult` (dataclass) | `epoch: int`, `train_loss: float`, `test_loss: float`, `metric_dict: dict[str, float]` — what `.loop()` returns |
+| `Reporter` (`Protocol`) | `__call__(epoch: int, train_loss: float, test_loss: float, metric_dict: dict[str, float]) -> None` — any matching callable qualifies, no subclassing |
+| `EarlyStopping` | `(log_dir: Path, patience=7, verbose=False, delta=0.0, save=False)`; called as `early_stopping(val_loss, model)`; `.get_best() -> nn.Module` |
+
+`Trainer.log_dir` is computed at construction (`logdir / f"{timestamp}-{hex6}"`) but never created
+on disk unless something writes to it — currently only `EarlyStopping.save_checkpoint` when
+`save=True`. mlflow/ray/tensorboard adapters: [10. Reporters cookbook](10-reporters.md).
+
+---
+
+## 7.11 Easily-confused signatures
 
 These are the ones that bite in practice:
 

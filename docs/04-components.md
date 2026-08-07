@@ -247,7 +247,7 @@ pipeline.eval();  assert     torch.allclose(pipeline(X), pipeline(X))
 ## 4.8 Metrics — `metrics.py`
 
 All metrics subclass `Metric`, handle numpy/tensor conversion in `__call__`, and return a plain
-`float` so `mltrainer` can log them.
+`float` so `vectormesh.training.Trainer` can log them.
 
 | Class | Use |
 |---|---|

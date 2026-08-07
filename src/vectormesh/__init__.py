@@ -14,6 +14,13 @@ from vectormesh.data import (
     Vectorizer,
     build,
 )
+from vectormesh.training import (
+    EarlyStopping,
+    Reporter,
+    Trainer,
+    TrainerSettings,
+    TrainResult,
+)
 
 __version__ = version("vectormesh")
 
@@ -27,6 +34,11 @@ __all__ = [
     "PatchImageVectorizer",
     "RegexVectorizer",
     "ChunkedRegexVectorizer",
+    "Trainer",
+    "TrainerSettings",
+    "EarlyStopping",
+    "Reporter",
+    "TrainResult",
 ]
 
 logger.remove()

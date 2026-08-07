@@ -1,6 +1,6 @@
 [project]
 name = "vectormesh"
-version = "0.8.2"
+version = "0.9.0"
 description = "Add your description here"
 readme = "README.md"
 authors = [
@@ -14,7 +14,6 @@ dependencies = [
     "huggingface-hub>=0.30",
     "jaxtyping>=0.3.4",
     "loguru>=0.7.3",
-    "mltrainer>=0.3.6",
     "networkx>=3.6.1",
     "numpy>=2.4.0",
     "pillow>=10.0.0",
@@ -23,6 +22,7 @@ dependencies = [
     "pyvis>=0.3.2",
     "sentence-transformers>=2.0.0",
     "torch>=2.9.1",
+    "tqdm>=4.65.0",
     "transformers>=4.57.3",
 ]
 
