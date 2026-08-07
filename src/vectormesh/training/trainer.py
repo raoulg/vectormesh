@@ -25,9 +25,8 @@ BatchTensor = torch.Tensor | tuple[torch.Tensor, ...]
 class Reporter(Protocol):
     """Anything shaped like ``report(epoch, train_loss, test_loss, metric_dict)``.
 
-    This is a structural (``Protocol``) type, not an ABC -- there is nothing to
-    subclass and nothing to import from vectormesh to satisfy it. A bare
-    function or lambda with this signature already qualifies:
+    This is a structural (``Protocol``) type. A bare
+    function or lambda with this signature qualifies:
 
     >>> def to_ray(epoch, train_loss, test_loss, metric_dict):
     ...     from ray import tune
