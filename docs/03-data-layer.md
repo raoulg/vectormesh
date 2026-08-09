@@ -247,6 +247,58 @@ These folders are a `save_to_disk` layout, not parquet, so `datasets.load_datase
 **not** read them and `from_hub` will. Asking for a split that does not exist raises with
 the list of splits that do.
 
+### Publishing one — `push_to_hub`
+
+The inverse of `from_hub`: what it uploads is what that downloads — the vector columns,
+the labels, `source_idx` and `metadata.json`, under a folder named for the split.
+
+```python
+repo = traincache.hub_repo_id("pttrn-io", "eurosat")   # pttrn-io/eurosat-dinov2-small
+
+traincache.push_to_hub(repo, split="train", source_dataset="blanchon/EuroSAT_RGB")
+testcache.push_to_hub(repo, split="test", source_dataset="blanchon/EuroSAT_RGB")
+```
+
+The repo id is **derived, not typed**. `hub_repo_id(org, dataset)` reads the encoder from
+`metadata.json`'s `model_tag`, so the repo id and the metadata cannot disagree about which
+checkpoint produced the vectors. One repo per (dataset × encoder): a repo named for the
+dataset alone collides with itself the moment a second encoder is tried.
+
+Call it once per split. Each call rewrites the dataset card to cover **every** split the
+repo has by then — it reads back the other splits' `metadata.json`, so pushing `test` into
+a repo that already holds `train` does not produce a card claiming the repo is test-only.
+
+```python
+cache.push_to_hub(repo, drop_columns=["image"], dry_run=True).card
+```
+
+`dry_run=True` stages the payload and renders the card without touching the hub, and
+returns the same `HubUpload` a real push does:
+
+| field | |
+|---|---|
+| `repo_id`, `split`, `url` | where it went, or would go |
+| `files`, `nbytes`, `megabytes` | **exactly** what travels |
+| `card` | the rendered `README.md` |
+| `uploaded` | False after a dry run |
+
+**Read `files` before a first publish.** What goes up is re-serialised from the cache's
+dataset into a temp folder, never copied from `cache_dir`, because `datasets` leaves its
+own `cache-<hash>.arrow` files next to any dataset it has mapped over — uploading the
+folder as it sits doubles the download for everyone who ever pulls the cache. The payload
+is arrow and json or `push_to_hub` refuses to send it.
+
+`drop_columns=["image"]` leaves the raw column out and updates `metadata["features"]` to
+match; pixels are ~100x their embeddings, text usually earns its place. Publishing without
+`source_idx` warns: nobody downstream can then get from a vector back to the row it came
+from.
+
+The generated card quotes only what `metadata.json` says — encoder, width, per-row shape,
+chunk-size summary (median/p95/max), rows per split, the vectormesh version that built it —
+plus the source dataset and encoder **pinned to the revisions they resolve to today**. Pass
+`card="..."` to supply your own, or `write_card=False` to leave a hand-edited `README.md`
+alone on later pushes.
+
 ### Joining two caches — `join`
 
 Two encoders over the same rows are the raw material for a `Parallel` pipeline, but they

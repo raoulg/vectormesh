@@ -1,6 +1,7 @@
 import hashlib
 import json
 import shutil
+import tempfile
 import uuid
 from collections import Counter
 from datetime import datetime
@@ -23,16 +24,18 @@ from torch.utils.data import Dataset as TorchDataset
 
 from vectormesh.types import Cachable, VectorMeshError
 
+from .hub import (
+    META_NON_COLUMN_KEYS,
+    HubUpload,
+    render_card,
+    stage_payload,
+    vector_columns,
+)
 from .vectorizers import BaseVectorizer
 
 TVectorizer = TypeVar("TVectorizer", bound=BaseVectorizer)
 
-# Keys in metadata.json that describe the cache as a whole rather than one column.
-# Module level, not a class attribute: VectorCache is a pydantic model, so a leading
-# underscore would make this a private attribute, and an uninitialised private attribute
-# raises AttributeError -- which `__getattr__` below would then quietly translate into a
-# lookup on the wrapped Dataset, turning a typo into a baffling error message.
-META_NON_COLUMN_KEYS = frozenset({"features", "created_at", "num_observations"})
+__all__ = ["VectorCache", "META_NON_COLUMN_KEYS", "HubUpload"]
 
 
 class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
@@ -346,6 +349,269 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
             )
         return cls.load(path)
 
+    def hub_repo_id(self, org: str, dataset: str) -> str:
+        """The repo id this cache belongs in: `{org}/{dataset}-{encoder}`.
+
+        Derived rather than typed, and derived from `metadata.json`'s `model_tag` rather
+        than from the folder name, so the repo id and the metadata cannot disagree about
+        which checkpoint produced the vectors:
+
+            cache.hub_repo_id("pttrn-io", "eurosat")   # pttrn-io/eurosat-dinov2-small
+
+        The encoder tag is mirrored unabbreviated -- everything after the `/` in the
+        model id. One repo per (dataset x encoder): a repo named for the dataset alone
+        collides with itself the moment a second encoder is tried, and nobody downstream
+        can tell which vectors they got.
+
+        Raises:
+            VectorMeshError: when this cache has no single encoder to name a repo after,
+                i.e. after a `join()`. Pass the repo id to `push_to_hub` yourself.
+        """
+        columns = self.vector_columns
+        if len(columns) != 1:
+            raise VectorMeshError(
+                f"cannot derive a repo id: this cache describes {columns}, so there is "
+                "no single encoder to name it after. Pass repo_id to push_to_hub "
+                "explicitly -- likely needed after a join()."
+            )
+        tag = self.metadata[columns[0]].get("model_tag")
+        if not tag:
+            raise VectorMeshError(
+                f"metadata for {columns[0]!r} has no model_tag to derive a repo id from."
+            )
+        return f"{org}/{dataset}-{str(tag).split('/')[-1]}"
+
+    def push_to_hub(
+        self,
+        repo_id: str,
+        split: str = "train",
+        *,
+        source_dataset: Optional[str] = None,
+        drop_columns: Optional[list[str]] = None,
+        card: Optional[str] = None,
+        write_card: bool = True,
+        license: str = "other",
+        private: bool = False,
+        token: Optional[str] = None,
+        dry_run: bool = False,
+    ) -> HubUpload:
+        """Publish this cache to the HuggingFace hub as one split of a dataset repo.
+
+        The inverse of `from_hub`: what this uploads is what that downloads -- the vector
+        columns, the labels, `source_idx` and `metadata.json`, in the `save_to_disk`
+        layout, under a folder named for the split.
+
+            cache.push_to_hub("pttrn-io/eurosat-dinov2-small", split="train")
+            testcache.push_to_hub("pttrn-io/eurosat-dinov2-small", split="test")
+
+        Call it once per split; splits are separate folders in one repo, and each call
+        rewrites the dataset card to cover every split the repo has by then.
+
+        What goes up is re-serialised from this cache's dataset into a temporary folder,
+        not copied from `cache_dir`: `datasets` leaves its own `cache-<hash>.arrow` files
+        next to a dataset it has mapped over, and uploading the folder as it sits means
+        uploading those too. The returned `HubUpload` lists every file and its total
+        size -- check it before a first publish, or pass `dry_run=True` to see it without
+        touching the hub.
+
+        This is not `Dataset.push_to_hub`, which writes parquet: browsable in the hub
+        viewer, but not a layout `from_hub` can read, and it leaves `metadata.json`
+        behind. Reach through to `cache.dataset.push_to_hub(...)` if that is what you
+        want, and expect to upload the metadata yourself.
+
+        Args:
+            repo_id: hub dataset id. `hub_repo_id()` derives the conventional one.
+            split: folder to publish into, and the name `from_hub(split=...)` will use.
+            source_dataset: hub id of the dataset the vectors were built from. Recorded
+                in the card, pinned to the revision it resolves to today.
+            drop_columns: columns to leave out of the upload, e.g. `["image"]`. Raw
+                pixels are ~100x their embeddings; text usually earns its place.
+            card: dataset card to upload verbatim. Defaults to one generated from the
+                metadata of every split in the repo.
+            write_card: set False to leave the repo's README.md alone, e.g. when it has
+                been edited by hand since the first push.
+            license: the `license` field of the generated card's frontmatter. A cache
+                inherits the terms of the data it was built from.
+            private: create the repo private. Ignored if the repo already exists.
+            token: write token; falls back to the ambient HF login.
+            dry_run: render the card and stage the payload, upload nothing.
+
+        Raises:
+            VectorMeshError: on an empty cache, a `drop_columns` name that is not a
+                column, dropping the last vector column, or a staged payload holding
+                anything but arrow and json.
+        """
+        dataset = self._ensure_dataset_loaded().with_format(None)
+        if len(dataset) == 0:
+            raise VectorMeshError("refusing to publish an empty cache")
+
+        for column in drop_columns or []:
+            if column not in dataset.column_names:
+                raise VectorMeshError(
+                    f"cannot drop {column!r}: this cache has {dataset.column_names}"
+                )
+        if drop_columns:
+            dataset = dataset.remove_columns(drop_columns)
+
+        metadata = {
+            key: value
+            for key, value in self.metadata.items()
+            if key in dataset.column_names or key in META_NON_COLUMN_KEYS
+        }
+        metadata["features"] = dataset.column_names
+        if not vector_columns(metadata):
+            raise VectorMeshError(
+                "nothing left to publish: every column described by metadata.json was "
+                f"dropped. Kept columns: {dataset.column_names}"
+            )
+        self._warn_about_payload(dataset)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            staged = Path(tmp) / split
+            files = stage_payload(dataset, metadata, staged)
+            nbytes = sum(f.stat().st_size for f in files)
+            logger.info(
+                f"{repo_id} [{split}]: {len(dataset)} rows, {nbytes / 1e6:.1f} MB in "
+                f"{[f.name for f in files]}"
+            )
+
+            if not dry_run:
+                self._upload(repo_id, split, staged, private, token)
+
+            # Rendering resolves revisions over the network, so only pay for it when the
+            # card is going to be read: uploaded, or shown by a dry run.
+            if card is None and (write_card or dry_run):
+                card = render_card(
+                    repo_id,
+                    self._card_splits(repo_id, split, metadata, token=token),
+                    source_dataset=source_dataset,
+                    license=license,
+                    token=token,
+                )
+            card = card or ""
+            if write_card and not dry_run:
+                self._upload_card(repo_id, card, token)
+
+            upload = HubUpload(
+                repo_id=repo_id,
+                split=split,
+                files=[f.name for f in files],
+                nbytes=nbytes,
+                card=card,
+                url=f"https://huggingface.co/datasets/{repo_id}",
+                uploaded=not dry_run,
+            )
+
+        if dry_run:
+            logger.info(f"dry run: nothing uploaded to {upload.url}")
+        else:
+            logger.success(f"published {split} to {upload.url}")
+        return upload
+
+    def _warn_about_payload(self, dataset: Dataset) -> None:
+        """Flag the two things that make a published cache hard to use."""
+        heavy = [
+            name
+            for name, feature in dataset.features.items()
+            if type(feature).__name__ in {"Image", "Audio", "Video"}
+        ]
+        if heavy:
+            logger.warning(
+                f"{heavy} carry raw media and are ~100x the size of their embeddings. "
+                "Pass drop_columns= unless whoever downloads this needs them."
+            )
+        if "source_idx" not in dataset.column_names:
+            logger.warning(
+                "no 'source_idx' column: nobody downloading this can get from a vector "
+                "back to the row it was built from. Add it before vectorizing, with "
+                "dataset.add_column('source_idx', range(len(dataset))) *before* any "
+                "shuffle or select."
+            )
+
+    @staticmethod
+    def _upload(
+        repo_id: str, split: str, staged: Path, private: bool, token: Optional[str]
+    ) -> None:
+        """Create the repo if needed and upload the staged split folder."""
+        from huggingface_hub import HfApi
+
+        api = HfApi(token=token)
+        try:
+            api.create_repo(
+                repo_id, repo_type="dataset", private=private, exist_ok=True
+            )
+            api.upload_folder(
+                repo_id=repo_id,
+                repo_type="dataset",
+                folder_path=str(staged),
+                path_in_repo=split,
+                allow_patterns=["*.arrow", "*.json"],
+                commit_message=f"{split} split",
+            )
+        except Exception as e:
+            raise VectorMeshError(
+                f"Could not upload to {repo_id!r}. Publishing needs a write token: "
+                "pass token= or log in with `hf auth login`."
+            ) from e
+
+    @staticmethod
+    def _upload_card(repo_id: str, card: str, token: Optional[str]) -> None:
+        """Write README.md. A failed card is not a failed publish."""
+        from huggingface_hub import HfApi
+
+        try:
+            HfApi(token=token).upload_file(
+                path_or_fileobj=card.encode(),
+                path_in_repo="README.md",
+                repo_id=repo_id,
+                repo_type="dataset",
+                commit_message="dataset card",
+            )
+        except Exception as e:  # pragma: no cover - network path
+            logger.warning(f"data uploaded, but the dataset card failed: {e}")
+
+    @classmethod
+    def _card_splits(
+        cls, repo_id: str, split: str, metadata: dict, token: Optional[str]
+    ) -> dict[str, dict]:
+        """Metadata per split for the card: this one, plus any already in the repo.
+
+        The card quotes row counts per split, so pushing `test` into a repo that already
+        holds `train` must not rewrite the card as if `train` were gone. The other splits
+        are read back from their own `metadata.json` -- a few KB each, and the only place
+        that knows what they hold.
+        """
+        splits = {split: metadata}
+        for other in cls._hub_splits(repo_id, token=token):
+            if other == split:
+                continue
+            try:
+                from huggingface_hub import hf_hub_download
+
+                path = hf_hub_download(
+                    repo_id,
+                    f"{other}/metadata.json",
+                    repo_type="dataset",
+                    token=token,
+                )
+                with open(path) as f:
+                    splits[other] = json.load(f)
+            except Exception as e:  # pragma: no cover - network path
+                logger.warning(
+                    f"could not read {other}/metadata.json for the card: {e}"
+                )
+
+        order = ["train", "validation", "valid", "dev", "test"]
+        return dict(
+            sorted(
+                splits.items(),
+                key=lambda kv: (
+                    order.index(kv[0]) if kv[0] in order else len(order),
+                    kv[0],
+                ),
+            )
+        )
+
     @classmethod
     def get_or_create(
         cls,
@@ -442,7 +708,7 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
     @property
     def vector_columns(self) -> list[str]:
         """Columns described by metadata.json, i.e. the ones a vectorizer produced."""
-        return [k for k in self.metadata if k not in META_NON_COLUMN_KEYS]
+        return vector_columns(self.metadata)
 
     @property
     def num_classes(self) -> int:

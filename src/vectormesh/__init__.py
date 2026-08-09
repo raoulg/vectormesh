@@ -5,6 +5,7 @@ from loguru import logger
 
 from vectormesh.data import (
     BaseVectorizer,
+    HubUpload,
     ImageVectorizer,
     PatchImageVectorizer,
     ChunkedRegexVectorizer,
@@ -27,6 +28,7 @@ __version__ = version("vectormesh")
 
 __all__ = [
     "VectorCache",
+    "HubUpload",
     "LabelEncoder",
     "build",
     "BaseVectorizer",

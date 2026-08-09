@@ -56,6 +56,7 @@ from vectormesh.data import Collate, OneHot
 cache = VectorCache.load(path=Path("artefacts/my_dataset_train"))
 # ...or a cache someone else already paid to compute:
 # cache = VectorCache.from_hub("pttrn-io/eurosat-dinov2-small", split="train")
+# ...and `cache.push_to_hub(repo)` is how one gets published in the first place.
 hidden_size = cache.metadata["legal_dutch"]["hidden_size"]
 
 data = cache.dataset.map(OneHot(num_classes=32, label_col="labels", target_col="onehot"))

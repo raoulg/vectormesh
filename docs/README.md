@@ -78,6 +78,7 @@ src/vectormesh/
 │   ├── vectorizers.py     # Vectorizer, ImageVectorizer, RegexVectorizer,
 │   │                      # ChunkedRegexVectorizer + regex pattern builders
 │   ├── cache.py           # VectorCache: create / load / extend, metadata handling
+│   ├── hub.py             # publishing a cache: payload staging, dataset card
 │   ├── schema.py          # DatasetSchema: infer input/label column names
 │   └── dataset.py         # OneHot, Collate, CollateParallel, LabelEncoder, build()
 └── components/

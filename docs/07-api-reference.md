@@ -155,6 +155,22 @@ VectorCache.from_hub(
     cache_dir: Path | None = None,
 ) -> VectorCache
 
+cache.push_to_hub(
+    repo_id: str,
+    split: str = "train",
+    *,
+    source_dataset: str | None = None,   # pinned to a revision in the card
+    drop_columns: list[str] | None = None,
+    card: str | None = None,             # default: generated from metadata.json
+    write_card: bool = True,
+    license: str = "other",
+    private: bool = False,
+    token: str | None = None,
+    dry_run: bool = False,
+) -> HubUpload
+
+cache.hub_repo_id(org: str, dataset: str) -> str    # {org}/{dataset}-{encoder}
+
 cache.join(
     other: VectorCache,
     on: str = "source_idx",
@@ -162,6 +178,11 @@ cache.join(
     into: str | None = None,       # default: column, suffixed with other's encoder slug
 ) -> VectorCache
 ```
+
+`HubUpload` (frozen pydantic model, importable from `vectormesh`): `repo_id`, `split`,
+`files: list[str]`, `nbytes: int`, `megabytes: float`, `card: str`, `url: str`,
+`uploaded: bool`. `files` is the whole payload — arrow and json only, re-serialised rather
+than copied from `cache_dir`.
 
 Fields: `name: str`, `cache_dir: Path`, `dataset: Dataset | None`, `metadata: dict | None`.
 
