@@ -22,7 +22,7 @@ afternoon.
 |---|---|---|
 | 1 | [Core concepts](01-core-concepts.md) | The embed-once economics, thinking at the vector level, the 1D/2D/3D tensor-flow ladder |
 | 2 | [Tensor contracts](02-tensor-contracts.md) | Shapes as a type system: jaxtyping + beartype, reading shape errors |
-| 3 | [The data layer](03-data-layer.md) | Vectorizers, `VectorCache`, metadata, `DatasetSchema`, `OneHot`/`Collate` |
+| 3 | [The data layer](03-data-layer.md) | Vectorizers, `VectorCache`, metadata, publishing a cache to the HuggingFace hub, `DatasetSchema`, `OneHot`/`Collate` |
 | 4 | [Components](04-components.md) | Every building block: padding, aggregation, neural, connectors, gating, augmentation |
 | 5 | [Architectures](05-architectures.md) | Composing the blocks: serial, parallel fusion, skip/highway, MoE, chunk-aligned fusion |
 | 6 | [Training](06-training.md) | Metrics, loss choice, `vectormesh.training.Trainer` wiring, the batch scripts |
@@ -35,7 +35,7 @@ If you are **starting out**: read [Core concepts](01-core-concepts.md), then run
 `notebooks/1_training.ipynb`, then keep [Components](04-components.md) open as a lookup table.
 
 If you are **building a cache for others to use**: [The data layer](03-data-layer.md) is the
-contract you are publishing.
+contract you are publishing, down to `push_to_hub` and the dataset card it generates.
 
 If you are **extending the library**: [Tensor contracts](02-tensor-contracts.md) and
 [The data layer](03-data-layer.md) describe the two invariants that everything else relies on.

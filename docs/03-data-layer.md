@@ -253,23 +253,32 @@ The inverse of `from_hub`: what it uploads is what that downloads — the vector
 the labels, `source_idx` and `metadata.json`, under a folder named for the split.
 
 ```python
-repo = traincache.hub_repo_id("pttrn-io", "eurosat")   # pttrn-io/eurosat-dinov2-small
+SOURCE = "blanchon/EuroSAT_RGB"
 
-traincache.push_to_hub(repo, split="train", source_dataset="blanchon/EuroSAT_RGB")
-testcache.push_to_hub(repo, split="test", source_dataset="blanchon/EuroSAT_RGB")
+traincache.push_to_hub(org="pttrn-io", dataset_name="eurosat", source_dataset=SOURCE)
+testcache.push_to_hub(org="pttrn-io", dataset_name="eurosat", split="test",
+                      source_dataset=SOURCE)
 ```
 
-The repo id is **derived, not typed**. `hub_repo_id(org, dataset)` reads the encoder from
-`metadata.json`'s `model_tag`, so the repo id and the metadata cannot disagree about which
-checkpoint produced the vectors. One repo per (dataset × encoder): a repo named for the
-dataset alone collides with itself the moment a second encoder is tried.
+Both land in `pttrn-io/eurosat-dinov2-small`. The repo id is **derived, not typed**: you
+name the org and the dataset, and the encoder is appended from `metadata.json`'s
+`model_tag`, so the repo id and the metadata cannot disagree about which checkpoint
+produced the vectors. One repo per (dataset × encoder) — a repo named for the dataset alone
+collides with itself the moment a second encoder is tried.
+
+Pass `repo_id="org/name"` instead to publish somewhere that does not follow that
+convention; it is the only option for a cache with more than one encoder in it (after a
+`join()`), where there is no single encoder to name a repo after. `cache.hub_repo_id(org,
+dataset_name)` returns the derived id on its own, for printing it or checking whether the
+repo exists — publishing does not need it.
 
 Call it once per split. Each call rewrites the dataset card to cover **every** split the
 repo has by then — it reads back the other splits' `metadata.json`, so pushing `test` into
 a repo that already holds `train` does not produce a card claiming the repo is test-only.
 
 ```python
-cache.push_to_hub(repo, drop_columns=["image"], dry_run=True).card
+cache.push_to_hub(org="pttrn-io", dataset_name="eurosat",
+                  drop_columns=["image"], dry_run=True).card
 ```
 
 `dry_run=True` stages the payload and renders the card without touching the hub, and

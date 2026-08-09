@@ -156,9 +156,11 @@ VectorCache.from_hub(
 ) -> VectorCache
 
 cache.push_to_hub(
-    repo_id: str,
+    repo_id: str | None = None,          # or derive it from org + dataset_name
     split: str = "train",
     *,
+    org: str | None = None,              # e.g. "pttrn-io"
+    dataset_name: str | None = None,     # e.g. "eurosat"; encoder appended from metadata
     source_dataset: str | None = None,   # pinned to a revision in the card
     drop_columns: list[str] | None = None,
     card: str | None = None,             # default: generated from metadata.json
@@ -169,7 +171,7 @@ cache.push_to_hub(
     dry_run: bool = False,
 ) -> HubUpload
 
-cache.hub_repo_id(org: str, dataset: str) -> str    # {org}/{dataset}-{encoder}
+cache.hub_repo_id(org: str, dataset_name: str) -> str   # {org}/{dataset_name}-{encoder}
 
 cache.join(
     other: VectorCache,
@@ -178,6 +180,9 @@ cache.join(
     into: str | None = None,       # default: column, suffixed with other's encoder slug
 ) -> VectorCache
 ```
+
+Exactly one of `repo_id` or `org`+`dataset_name` — passing both raises, passing neither
+raises.
 
 `HubUpload` (frozen pydantic model, importable from `vectormesh`): `repo_id`, `split`,
 `files: list[str]`, `nbytes: int`, `megabytes: float`, `card: str`, `url: str`,

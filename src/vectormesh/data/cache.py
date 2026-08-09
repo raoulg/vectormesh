@@ -349,29 +349,31 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
             )
         return cls.load(path)
 
-    def hub_repo_id(self, org: str, dataset: str) -> str:
-        """The repo id this cache belongs in: `{org}/{dataset}-{encoder}`.
+    def hub_repo_id(self, org: str, dataset_name: str) -> str:
+        """The repo id this cache belongs in: `{org}/{dataset_name}-{encoder}`.
 
-        Derived rather than typed, and derived from `metadata.json`'s `model_tag` rather
-        than from the folder name, so the repo id and the metadata cannot disagree about
-        which checkpoint produced the vectors:
+        `push_to_hub(org=..., dataset_name=...)` calls this itself; use it directly only
+        to find out where a cache would go without publishing it -- printing it, or
+        checking whether the repo already exists.
 
-            cache.hub_repo_id("pttrn-io", "eurosat")   # pttrn-io/eurosat-dinov2-small
-
-        The encoder tag is mirrored unabbreviated -- everything after the `/` in the
+        The encoder comes from `metadata.json`'s `model_tag`, not from the folder name,
+        so the repo id and the metadata cannot disagree about which checkpoint produced
+        the vectors, and it is mirrored unabbreviated -- everything after the `/` in the
         model id. One repo per (dataset x encoder): a repo named for the dataset alone
         collides with itself the moment a second encoder is tried, and nobody downstream
         can tell which vectors they got.
 
+            cache.hub_repo_id("pttrn-io", "eurosat")   # pttrn-io/eurosat-dinov2-small
+
         Raises:
             VectorMeshError: when this cache has no single encoder to name a repo after,
-                i.e. after a `join()`. Pass the repo id to `push_to_hub` yourself.
+                i.e. after a `join()`. Pass `repo_id` to `push_to_hub` instead.
         """
         columns = self.vector_columns
         if len(columns) != 1:
             raise VectorMeshError(
                 f"cannot derive a repo id: this cache describes {columns}, so there is "
-                "no single encoder to name it after. Pass repo_id to push_to_hub "
+                "no single encoder to name it after. Pass repo_id= to push_to_hub "
                 "explicitly -- likely needed after a join()."
             )
         tag = self.metadata[columns[0]].get("model_tag")
@@ -379,13 +381,34 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
             raise VectorMeshError(
                 f"metadata for {columns[0]!r} has no model_tag to derive a repo id from."
             )
-        return f"{org}/{dataset}-{str(tag).split('/')[-1]}"
+        return f"{org}/{dataset_name}-{str(tag).split('/')[-1]}"
+
+    def _resolve_repo_id(
+        self, repo_id: Optional[str], org: Optional[str], dataset_name: Optional[str]
+    ) -> str:
+        """Take the repo id as given, or derive it from `(org, dataset_name)`."""
+        if repo_id and (org or dataset_name):
+            raise VectorMeshError(
+                f"pass either repo_id={repo_id!r} or org=/dataset_name= to derive one, "
+                "not both."
+            )
+        if repo_id:
+            return repo_id
+        if org and dataset_name:
+            return self.hub_repo_id(org, dataset_name)
+        raise VectorMeshError(
+            "push_to_hub needs somewhere to publish to: pass repo_id=, or org= and "
+            'dataset_name= to derive it (org="pttrn-io", dataset_name="eurosat" -> '
+            '"pttrn-io/eurosat-dinov2-small").'
+        )
 
     def push_to_hub(
         self,
-        repo_id: str,
+        repo_id: Optional[str] = None,
         split: str = "train",
         *,
+        org: Optional[str] = None,
+        dataset_name: Optional[str] = None,
         source_dataset: Optional[str] = None,
         drop_columns: Optional[list[str]] = None,
         card: Optional[str] = None,
@@ -401,8 +424,12 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
         columns, the labels, `source_idx` and `metadata.json`, in the `save_to_disk`
         layout, under a folder named for the split.
 
-            cache.push_to_hub("pttrn-io/eurosat-dinov2-small", split="train")
-            testcache.push_to_hub("pttrn-io/eurosat-dinov2-small", split="test")
+            traincache.push_to_hub(org="pttrn-io", dataset_name="eurosat")
+            testcache.push_to_hub(org="pttrn-io", dataset_name="eurosat", split="test")
+
+        Naming the org and the dataset rather than the repo derives the repo id from this
+        cache's own encoder -- `pttrn-io/eurosat-dinov2-small` above, see `hub_repo_id`.
+        Pass `repo_id=` instead to publish somewhere that does not follow that convention.
 
         Call it once per split; splits are separate folders in one repo, and each call
         rewrites the dataset card to cover every split the repo has by then.
@@ -420,8 +447,12 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
         want, and expect to upload the metadata yourself.
 
         Args:
-            repo_id: hub dataset id. `hub_repo_id()` derives the conventional one.
+            repo_id: hub dataset id, when it is not the derived one. Mutually exclusive
+                with org/dataset_name.
             split: folder to publish into, and the name `from_hub(split=...)` will use.
+            org: hub organisation or user to publish under, e.g. "pttrn-io".
+            dataset_name: short name of the dataset for the repo id, e.g. "eurosat".
+                The encoder is appended from this cache's metadata.
             source_dataset: hub id of the dataset the vectors were built from. Recorded
                 in the card, pinned to the revision it resolves to today.
             drop_columns: columns to leave out of the upload, e.g. `["image"]`. Raw
@@ -437,10 +468,11 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
             dry_run: render the card and stage the payload, upload nothing.
 
         Raises:
-            VectorMeshError: on an empty cache, a `drop_columns` name that is not a
-                column, dropping the last vector column, or a staged payload holding
-                anything but arrow and json.
+            VectorMeshError: when the repo id is neither given nor derivable, on an empty
+                cache, a `drop_columns` name that is not a column, dropping the last
+                vector column, or a staged payload holding anything but arrow and json.
         """
+        repo_id = self._resolve_repo_id(repo_id, org, dataset_name)
         dataset = self._ensure_dataset_loaded().with_format(None)
         if len(dataset) == 0:
             raise VectorMeshError("refusing to publish an empty cache")

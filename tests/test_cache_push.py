@@ -280,6 +280,25 @@ def test_hub_repo_id_derives_from_the_model_tag(cache: VectorCache):
     assert cache.hub_repo_id("pttrn-io", "eurosat") == "pttrn-io/eurosat-dinov2-small"
 
 
+def test_push_derives_the_repo_id_from_org_and_dataset_name(
+    cache: VectorCache, stub_hub
+):
+    """The ordinary call names the org and the dataset; the encoder comes from metadata."""
+    upload = cache.push_to_hub(org="pttrn-io", dataset_name="eurosat", dry_run=True)
+
+    assert upload.repo_id == "pttrn-io/eurosat-dinov2-small"
+
+
+def test_push_needs_a_repo_id_from_somewhere(cache: VectorCache):
+    with pytest.raises(VectorMeshError, match="somewhere to publish to"):
+        cache.push_to_hub(dry_run=True)
+
+
+def test_push_refuses_a_repo_id_and_a_derivation_at_once(cache: VectorCache):
+    with pytest.raises(VectorMeshError, match="not both"):
+        cache.push_to_hub("acme/stub", org="pttrn-io", dry_run=True)
+
+
 def test_hub_repo_id_refuses_an_ambiguous_cache(cache: VectorCache, tmp_path):
     joined = VectorCache(
         name="joined",
@@ -435,7 +454,8 @@ def test_dry_run_against_a_real_published_cache():
     """
     cache = VectorCache.from_hub("pttrn-io/eurosat-dinov2-small", split="test")
     upload = cache.push_to_hub(
-        cache.hub_repo_id("pttrn-io", "eurosat"),
+        org="pttrn-io",
+        dataset_name="eurosat",
         split="test",
         source_dataset="blanchon/EuroSAT_RGB",
         dry_run=True,
