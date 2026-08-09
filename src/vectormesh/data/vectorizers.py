@@ -7,7 +7,6 @@ from abc import ABC, abstractmethod
 from collections import Counter
 from typing import Any, Callable, ClassVar, Optional
 
-import matplotlib.pyplot as plt
 import torch
 from beartype import beartype
 from jaxtyping import Float, Int, jaxtyped
@@ -16,7 +15,7 @@ from pydantic import Field, PrivateAttr, model_validator
 from torch import Tensor
 from transformers import AutoConfig, AutoImageProcessor, AutoModel, AutoTokenizer
 
-from vectormesh.types import Cachable
+from vectormesh.types import Cachable, VectorMeshError
 
 
 def _json_safe(value: Any) -> Any:
@@ -718,6 +717,18 @@ class RegexVectorizer(BaseVectorizer):
         logger.info(f"most commonn {match_counts.most_common(top_k)}")
 
         if plot and len(match_counts) > 0:
+            # Imported here, not at module scope: matplotlib is only needed for this one
+            # optional chart, and a top-level import makes it a hard requirement of
+            # `import vectormesh` for everyone who never plots.
+            try:
+                import matplotlib.pyplot as plt
+            except ImportError as e:
+                raise VectorMeshError(
+                    "print_stats(plot=True) needs matplotlib, which vectormesh does not "
+                    "install. `pip install matplotlib`, or call print_stats(plot=False) "
+                    "for the counts alone."
+                ) from e
+
             plt.figure(figsize=(12, 6))
             top_matches = match_counts.most_common(min(50, len(match_counts)))
             labels = [ref for ref, _ in top_matches]
