@@ -1,0 +1,17 @@
+# What vectormesh declares about itself, for Atlas. An override on naming and on which
+# flows are by design; never the source of the picture.
+order: [Data, Components, Training]
+bands:
+  top: [CLI]
+  bottom: [Types]
+rules:
+  vectormesh.data: Data
+  vectormesh.components: Components
+  vectormesh.training: Training
+  vectormesh.types: Types
+  vectormesh: CLI
+  scripts: CLI
+  _root: CLI
+base_roles: {}
+dependencies: against_flow
+allowed: []
