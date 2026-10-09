@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from collections import Counter
 from collections.abc import Callable
 from math import isqrt
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Self
 
 import torch
 from beartype import beartype
@@ -72,7 +72,7 @@ class BaseVectorizer(ABC, Cachable):
 
     @abstractmethod
     @model_validator(mode="after")
-    def initialize_model(self):
+    def initialize_model(self) -> Self:
         """
         Initialize the model/API connection.
         Must set self._metadata with at least:
@@ -181,7 +181,7 @@ class Vectorizer(BaseVectorizer):
     FINGERPRINT_EXCLUDE: ClassVar[frozenset[str]] = frozenset({"chunk_sizes"})
 
     @model_validator(mode="after")
-    def initialize_model(self):
+    def initialize_model(self) -> Self:
         self._metadata = AutoConfig.from_pretrained(self.model_name)
         self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
         self._model = AutoModel.from_pretrained(self.model_name).to(self.device).eval()
@@ -322,11 +322,11 @@ class Vectorizer(BaseVectorizer):
         return fields
 
     @property
-    def get_model(self):
+    def get_model(self) -> Any:
         return self._model
 
     @property
-    def get_tokenizer(self):
+    def get_tokenizer(self) -> Any:
         return self._tokenizer
 
     @property
@@ -334,22 +334,21 @@ class Vectorizer(BaseVectorizer):
         return self._stride
 
 
-class ImageVectorizer(BaseVectorizer):
+class _ImageModelVectorizer(BaseVectorizer):
     """
-    Image vectorizer using HuggingFace vision models.
+    What every image vectorizer shares: a HuggingFace vision model and its image
+    processor (a small CNN like ``microsoft/resnet-18`` or a distilled ViT like
+    ``facebook/dinov2-small``), run over batches of images.
 
-    Mirrors :class:`Vectorizer`, but for images: it uses an ``AutoImageProcessor``
-    plus an ``AutoModel`` (e.g. a small CNN like ``microsoft/resnet-18`` or a
-    distilled ViT like ``facebook/dinov2-small``) and produces a single embedding
-    vector per image, shape ``(dim,)``.
+    How the model's output becomes vectors is each vectorizer's own -- one per image
+    (:class:`ImageVectorizer`) or one per patch (:class:`PatchImageVectorizer`) -- and
+    so is the shape its ``__call__`` declares, which ``VectorCache`` reads the rank of
+    the cache from. The two are siblings: a pipeline built on one rank does not take
+    the other, so neither stands in for the other.
 
-    Because each image collapses to one vector (``tensordtype == 1``), the cached
-    output plugs directly into the same downstream pipeline as the regex path:
-    ``Collate(..., padder=torch.stack)`` + ``Serial([NeuralNet(...)])``.
-
-    The model is only ever run to fill the VectorCache, so the (one-time) cost
-    scales with model size while training the head on the cached vectors stays
-    cheap on CPU. Swap ``model_name`` to trade embedding quality for speed.
+    The model is only ever run to fill the VectorCache, so the (one-time) cost scales
+    with model size while training the head on the cached vectors stays cheap on CPU.
+    Swap ``model_name`` to trade embedding quality for speed.
     """
 
     model_name: str
@@ -364,23 +363,84 @@ class ImageVectorizer(BaseVectorizer):
     _effective_max_length: int | None = PrivateAttr(default=None)
 
     @model_validator(mode="after")
-    def initialize_model(self):
+    def initialize_model(self) -> Self:
         self._metadata = AutoConfig.from_pretrained(self.model_name)
         self._processor = AutoImageProcessor.from_pretrained(self.model_name)
         self._model = AutoModel.from_pretrained(self.model_name).to(self.device).eval()
         self._effective_max_length = None
-
-        # Probe the embedding dimension with a dummy forward. This is robust across
-        # architectures (ResNet config exposes `hidden_sizes`, ViT/DINOv2 exposes
-        # `hidden_size`) and matches whatever `_pool` actually returns.
         self._hidden_size = self._probe_dim()
 
         logger.info(f"Using device: {self.device}")
         logger.info(f"Image embedding dim: {self._hidden_size}")
         return self
 
+    @abstractmethod
+    def _vectors(self, outputs) -> Float[Tensor, "batch ..."]:
+        """The model's output for a batch of images as this vectorizer's vectors."""
+
+    def _probe(self) -> Tensor:
+        """The vectors of one dummy image.
+
+        Probing with a forward pass is robust across architectures (ResNet's config
+        exposes ``hidden_sizes``, ViT/DINOv2's ``hidden_size``) and matches whatever
+        ``_vectors`` actually returns.
+        """
+        from PIL import Image
+
+        dummy = Image.new("RGB", (224, 224))
+        inputs = self._processor([dummy], return_tensors="pt").to(self.device)
+        with torch.no_grad():
+            outputs = self._model(**inputs)
+        return self._vectors(outputs)
+
+    def _probe_dim(self) -> int:
+        return int(self._probe().shape[-1])
+
+    def _vectorize(self, inputs: list, batchsize: int) -> list[Tensor]:
+        """Every image's vectors, batch by batch, on the CPU."""
+        vectors: list[Tensor] = []
+        for i in range(0, len(inputs), batchsize):
+            batch = [img.convert("RGB") for img in inputs[i : i + batchsize]]
+            processed = self._processor(batch, return_tensors="pt").to(self.device)
+            with torch.no_grad():
+                outputs = self._model(**processed)
+            vectors.extend(self._vectors(outputs).cpu())
+        return vectors
+
+    @property
+    def get_metadata(self) -> dict:
+        return {
+            "model_name": self.model_name,
+            "col_name": self.col_name,
+            "hidden_size": self._hidden_size,
+            "context_size": self._effective_max_length,
+        }
+
+    @property
+    def get_hidden_size(self) -> int:
+        return self._hidden_size
+
+    @property
+    def get_model(self) -> Any:
+        return self._model
+
+    @property
+    def get_processor(self) -> Any:
+        return self._processor
+
+
+class ImageVectorizer(_ImageModelVectorizer):
+    """
+    Image vectorizer that pools every image down to one vector, shape ``(dim,)``.
+
+    Mirrors :class:`Vectorizer`, but for images. Because each image collapses to one
+    vector (``tensordtype == 1``), the cached output plugs directly into the same
+    downstream pipeline as the regex path: ``Collate(..., padder=torch.stack)`` +
+    ``Serial([NeuralNet(...)])``.
+    """
+
     @jaxtyped(typechecker=beartype)
-    def _pool(self, outputs) -> Float[Tensor, "batch dim"]:
+    def _vectors(self, outputs) -> Float[Tensor, "batch dim"]:
         """
         Reduce a vision model's output to one vector per image.
 
@@ -403,52 +463,14 @@ class ImageVectorizer(BaseVectorizer):
             f"Cannot pool last_hidden_state with {hidden.dim()} dimensions."
         )
 
-    def _probe_dim(self) -> int:
-        from PIL import Image
-
-        dummy = Image.new("RGB", (224, 224))
-        inputs = self._processor([dummy], return_tensors="pt").to(self.device)
-        with torch.no_grad():
-            outputs = self._model(**inputs)
-        return int(self._pool(outputs).shape[-1])
-
     @jaxtyped(typechecker=beartype)
     def __call__(
         self, inputs: list, batchsize: int
     ) -> dict[str, list[Float[Tensor, "dim"]]]:
-        vectors: list[Tensor] = []
-        for i in range(0, len(inputs), batchsize):
-            batch = [img.convert("RGB") for img in inputs[i : i + batchsize]]
-            processed = self._processor(batch, return_tensors="pt").to(self.device)
-            with torch.no_grad():
-                outputs = self._model(**processed)
-            pooled = self._pool(outputs).cpu()
-            vectors.extend([vec for vec in pooled])
-        return {self.col_name: vectors}
-
-    @property
-    def get_metadata(self) -> dict:
-        return {
-            "model_name": self.model_name,
-            "col_name": self.col_name,
-            "hidden_size": self._hidden_size,
-            "context_size": self._effective_max_length,
-        }
-
-    @property
-    def get_hidden_size(self) -> int:
-        return self._hidden_size
-
-    @property
-    def get_model(self):
-        return self._model
-
-    @property
-    def get_processor(self):
-        return self._processor
+        return {self.col_name: self._vectorize(inputs, batchsize)}
 
 
-class PatchImageVectorizer(ImageVectorizer):
+class PatchImageVectorizer(_ImageModelVectorizer):
     """
     Image vectorizer that **keeps** the patch axis: ``(C, D)`` per image.
 
@@ -485,7 +507,7 @@ class PatchImageVectorizer(ImageVectorizer):
     _grid: Any = PrivateAttr(default=None)
 
     @jaxtyped(typechecker=beartype)
-    def _patches(self, outputs) -> Float[Tensor, "batch chunks dim"]:
+    def _vectors(self, outputs) -> Float[Tensor, "batch chunks dim"]:
         hidden = outputs.last_hidden_state
         if hidden.dim() == 4:  # (b, dim, h, w) -> CNN
             return hidden.flatten(2).transpose(1, 2)
@@ -512,13 +534,7 @@ class PatchImageVectorizer(ImageVectorizer):
         return 0
 
     def _probe_dim(self) -> int:
-        from PIL import Image
-
-        dummy = Image.new("RGB", (224, 224))
-        inputs = self._processor([dummy], return_tensors="pt").to(self.device)
-        with torch.no_grad():
-            outputs = self._model(**inputs)
-        patches = self._patches(outputs)
+        patches = self._probe()
         n = patches.shape[1]
         side = isqrt(n)
         self._grid = (side, side) if side * side == n else (1, n)
@@ -529,23 +545,12 @@ class PatchImageVectorizer(ImageVectorizer):
     def __call__(
         self, inputs: list, batchsize: int
     ) -> dict[str, list[Float[Tensor, "chunks dim"]]]:
-        vectors: list[Tensor] = []
-        for i in range(0, len(inputs), batchsize):
-            batch = [img.convert("RGB") for img in inputs[i : i + batchsize]]
-            processed = self._processor(batch, return_tensors="pt").to(self.device)
-            with torch.no_grad():
-                outputs = self._model(**processed)
-            patches = self._patches(outputs).cpu()
-            vectors.extend([p for p in patches])
-        return {self.col_name: vectors}
+        return {self.col_name: self._vectorize(inputs, batchsize)}
 
     @property
     def get_metadata(self) -> dict:
         return {
-            "model_name": self.model_name,
-            "col_name": self.col_name,
-            "hidden_size": self._hidden_size,
-            "context_size": self._effective_max_length,
+            **super().get_metadata,
             "patch_grid": list(self._grid) if self._grid else None,
         }
 
@@ -555,13 +560,18 @@ class PatchImageVectorizer(ImageVectorizer):
         return self._grid
 
 
-class RegexVectorizer(BaseVectorizer):
+class _RegexFeatures(BaseVectorizer):
     """
-    Vectorizer that creates binary feature vectors based on regex pattern matches.
+    What every regex vectorizer shares: a pattern, fitted on a corpus into a
+    vocabulary of harmonized matches, and a text turned into a binary vector over
+    that vocabulary.
+
+    Which texts get a vector is each vectorizer's own -- a whole document
+    (:class:`RegexVectorizer`) or each chunk of an embedder's chunking
+    (:class:`ChunkedRegexVectorizer`) -- and so is the shape its ``__call__``
+    declares. The two are siblings: neither stands in for the other.
     """
 
-    model_name: str = "regex_vectorizer"
-    col_name: str = "regex_features"
     training_texts: list[str] | None = Field(
         default=None, description="Texts to fit on during initialization"
     )
@@ -592,7 +602,7 @@ class RegexVectorizer(BaseVectorizer):
     _doc_frequencies: Counter | None = PrivateAttr(default=None)
 
     @model_validator(mode="after")
-    def initialize_model(self):
+    def initialize_model(self) -> Self:
         """
         Initialize with compiled pattern.
         """
@@ -602,8 +612,8 @@ class RegexVectorizer(BaseVectorizer):
     def _init_regex(self):
         """Compile the pattern, set up metadata, and fit if training_texts given.
 
-        Kept separate from the validator so subclasses (e.g. ChunkedRegexVectorizer)
-        can reuse it without invoking a pydantic validator through super().
+        Kept separate from the validator so ChunkedRegexVectorizer can reuse it
+        without invoking a pydantic validator through super().
         """
         self._pattern_to_idx = {}
         self._compiled_pattern = self.pattern_builder()
@@ -638,7 +648,7 @@ class RegexVectorizer(BaseVectorizer):
 
         return match_counts, doc_frequencies
 
-    def fit(self, texts: list[str]) -> "RegexVectorizer":
+    def fit(self, texts: list[str]) -> Self:
         # Compute or reuse cached counts
         if self._match_counts is None or self._doc_frequencies is None:
             self._match_counts, self._doc_frequencies = self._compute_match_counts(
@@ -688,21 +698,15 @@ class RegexVectorizer(BaseVectorizer):
                 vector[idx] = 1.0
         return vector
 
-    @jaxtyped(typechecker=beartype)
-    def __call__(
-        self, inputs: list[str], batchsize: int = 32
-    ) -> dict[str, list[Float[Tensor, "hidden_size"]]]:
+    def _require_fit(self) -> None:
         if not self._pattern_to_idx:
             raise RuntimeError(
                 "Vectorizer must be fitted before calling. Run .fit(texts) first."
             )
 
-        vectors = [self._vectorize_text(text).to(self.device) for text in inputs]
-        return {self.col_name: vectors}
-
     def print_stats(
         self, texts: list[str] | None = None, top_k: int = 20, plot: bool = True
-    ):
+    ) -> None:
         if texts is None:
             if self._match_counts is None:
                 raise RuntimeError(
@@ -786,7 +790,25 @@ class RegexVectorizer(BaseVectorizer):
         return fields
 
 
-class ChunkedRegexVectorizer(RegexVectorizer):
+class RegexVectorizer(_RegexFeatures):
+    """
+    Vectorizer that creates binary feature vectors based on regex pattern matches,
+    one ``(hidden_size,)`` vector per document.
+    """
+
+    model_name: str = "regex_vectorizer"
+    col_name: str = "regex_features"
+
+    @jaxtyped(typechecker=beartype)
+    def __call__(
+        self, inputs: list[str], batchsize: int = 32
+    ) -> dict[str, list[Float[Tensor, "hidden_size"]]]:
+        self._require_fit()
+        vectors = [self._vectorize_text(text).to(self.device) for text in inputs]
+        return {self.col_name: vectors}
+
+
+class ChunkedRegexVectorizer(_RegexFeatures):
     """Regex vectorizer that aligns its binary features with an embedder's chunks.
 
     Where ``RegexVectorizer`` emits one ``(hidden_size,)`` vector per document, this
@@ -823,7 +845,7 @@ class ChunkedRegexVectorizer(RegexVectorizer):
     _supports_offsets: bool = PrivateAttr(default=True)
 
     @model_validator(mode="after")
-    def initialize_model(self):
+    def initialize_model(self) -> Self:
         self._init_regex()  # compile pattern + fit if training_texts given
         self._tokenizer = AutoTokenizer.from_pretrained(self.tokenizer_name)
         # Report the aligned context window through the BaseVectorizer API.
@@ -891,10 +913,7 @@ class ChunkedRegexVectorizer(RegexVectorizer):
     def __call__(
         self, inputs: list[str], batchsize: int = 32
     ) -> dict[str, list[Float[Tensor, "chunks hidden_size"]]]:
-        if not self._pattern_to_idx:
-            raise RuntimeError(
-                "Vectorizer must be fitted before calling. Run .fit(texts) first."
-            )
+        self._require_fit()
 
         if not self._supports_offsets:
             # No alignment possible: one whole-document chunk per text, still a 2D

@@ -163,7 +163,7 @@ class Siamese(nn.Module):
         prediction = self.predictor(z_online) if self.predictor else z_online
         return prediction, z_target
 
-    def forward(self, views: tuple[Tensor, Tensor]):
+    def forward(self, views: tuple[Tensor, Tensor]) -> tuple[Tensor, Tensor]:
         view_a, view_b = views
         if self.training:
             self.update_target()
