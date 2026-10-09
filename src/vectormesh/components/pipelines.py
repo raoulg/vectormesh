@@ -1,23 +1,48 @@
 import copy
+from collections.abc import Sequence
+from typing import Any
 
 import torch
 from beartype import beartype
 from jaxtyping import jaxtyped
 from torch import Tensor, nn
 
-from vectormesh.types import TensorInput
+from vectormesh.types import BaseComponent, TensorInput
 
 
-class Serial(nn.Module):
+class Lift(BaseComponent):
+    """A plain `nn.Module` as a component: its own `forward`, without shape checks.
+
+    `Serial` and `Parallel` lift what they are given, so `Serial([nn.Linear(8, 4)])`
+    works; a module built as a component keeps its jaxtyping contract.
+    """
+
+    def __init__(self, module: nn.Module):
+        super().__init__()
+        self.module = module
+
+    def forward(self, *args: Any, **kwargs: Any) -> TensorInput:
+        return self.module(*args, **kwargs)
+
+
+def as_component(module: BaseComponent | nn.Module) -> BaseComponent:
+    """A component as it is; any other module lifted into one."""
+    return module if isinstance(module, BaseComponent) else Lift(module)
+
+
+class Serial(BaseComponent):
     """Sequential composition - just runs components in order.
     Tensor checking happens via jaxtyping decorators on each component.
+
+    A Serial is a component made of components, so pipelines nest: a Serial of
+    Parallels of Serials. An empty Serial is the identity.
     """
 
     components: nn.ModuleList
 
-    def __init__(self, components: list[nn.Module]):
+    def __init__(self, components: Sequence[BaseComponent | nn.Module]):
         super().__init__()
-        self.components = nn.ModuleList(components)
+        self.components = nn.ModuleList(as_component(c) for c in components)
 
     @jaxtyped(typechecker=beartype)
     def forward(self, tensors: TensorInput) -> TensorInput:
@@ -28,18 +53,19 @@ class Serial(nn.Module):
         return result
 
 
-class Parallel(nn.Module):
+class Parallel(BaseComponent):
     """Parallel composition - runs branches independently and returns tuple.
     All branches receive the same input of Tuple[Tensor, ...] and return Tuple[Tensor, ...].
 
-    The number of branches must match the number of tensors in the input tuple.
+    The number of branches must match the number of tensors in the input tuple. A
+    Parallel is a component made of components, like Serial.
     """
 
     branches: nn.ModuleList
 
-    def __init__(self, branches: list[nn.Module]):
+    def __init__(self, branches: Sequence[BaseComponent | nn.Module]):
         super().__init__()
-        self.branches = nn.ModuleList(branches)
+        self.branches = nn.ModuleList(as_component(b) for b in branches)
 
     @jaxtyped(typechecker=beartype)
     def forward(self, tensors: TensorInput) -> TensorInput:

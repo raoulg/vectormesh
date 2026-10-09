@@ -13,7 +13,7 @@ from .gating import Gate, Highway, MoE, Skip, SparseMoE
 from .metrics import RepresentationStd
 from .neural import Attention, NeuralNet, Projection, TransformerBlock
 from .padding import DynamicPadding, FixedPadding
-from .pipelines import JEPA, Parallel, Serial, Siamese
+from .pipelines import JEPA, Lift, Parallel, Serial, Siamese
 
 __all__ = [
     "JEPA",
@@ -27,6 +27,7 @@ __all__ = [
     "Gate",
     "GaussianNoise",
     "Highway",
+    "Lift",
     "MaskedMeanAggregator",
     "MeanAggregator",
     "MoE",

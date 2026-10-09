@@ -41,10 +41,15 @@ at runtime via @jaxtyped(typechecker=beartype)."""
 
 
 class BaseComponent(nn.Module, ABC):
-    """Root class for all pipeline components."""
+    """Root class for all pipeline components.
+
+    A component maps a tensor, or a tuple of tensors, to a tensor or a tuple of tensors
+    (`TensorInput`); concrete components narrow that to the shapes they take and give.
+    `Serial` and `Parallel` are components too, made of components.
+    """
 
     def __init__(self):
         super().__init__()
 
     @abstractmethod
-    def forward(self, *args: Any, **kwargs: Any) -> Float[Tensor, "..."]: ...
+    def forward(self, *args: Any, **kwargs: Any) -> TensorInput: ...
