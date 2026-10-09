@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Optional, Tuple, Union
+from typing import Any
 
 from jaxtyping import Float
 from pydantic import BaseModel, ConfigDict
@@ -19,9 +19,7 @@ class VectorMeshError(Exception):
         fix: Suggested fix or next steps
     """
 
-    def __init__(
-        self, message: str, hint: Optional[str] = None, fix: Optional[str] = None
-    ):
+    def __init__(self, message: str, hint: str | None = None, fix: str | None = None):
         super().__init__(message)
         self.hint = hint
         self.fix = fix
@@ -36,7 +34,7 @@ class Cachable(BaseModel):
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
 
-TensorInput = Union[Float[Tensor, "..."], Tuple[Float[Tensor, "..."], ...]]
+TensorInput = Float[Tensor, "..."] | tuple[Float[Tensor, "..."], ...]
 """Documented union for connector/wiring code that accepts either a single tensor
 or a tuple of tensors. Concrete components narrow to one branch and enforce it
 at runtime via @jaxtyped(typechecker=beartype)."""

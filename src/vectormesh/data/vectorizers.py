@@ -2,10 +2,11 @@
 
 import json
 import re
-from math import isqrt
 from abc import ABC, abstractmethod
 from collections import Counter
-from typing import Any, Callable, ClassVar, Optional
+from collections.abc import Callable
+from math import isqrt
+from typing import Any, ClassVar
 
 import torch
 from beartype import beartype
@@ -67,7 +68,7 @@ class BaseVectorizer(ABC, Cachable):
     FINGERPRINT_EXCLUDE: ClassVar[frozenset[str]] = frozenset()
 
     _metadata: Any = PrivateAttr()
-    _effective_max_length: Optional[int] = PrivateAttr(default=None)
+    _effective_max_length: int | None = PrivateAttr(default=None)
 
     @abstractmethod
     @model_validator(mode="after")
@@ -79,7 +80,6 @@ class BaseVectorizer(ABC, Cachable):
         Must set self._effective_max_length to the actual context limit used,
         or None if the concept does not apply (e.g. RegexVectorizer).
         """
-        pass
 
     @abstractmethod
     @jaxtyped(typechecker=beartype)
@@ -97,7 +97,6 @@ class BaseVectorizer(ABC, Cachable):
             Dict with '{self.col_name : list[Tensor]}'.
             Tensor dimensionality varies by implementation
         """
-        pass
 
     @property
     def get_metadata(self) -> dict:
@@ -108,7 +107,7 @@ class BaseVectorizer(ABC, Cachable):
         return {
             "model_name": self.model_name,
             "col_name": self.col_name,
-            "hidden_size": getattr(self._metadata, "hidden_size"),
+            "hidden_size": self._metadata.hidden_size,
             "context_size": self._effective_max_length,
         }
 
@@ -152,10 +151,10 @@ class BaseVectorizer(ABC, Cachable):
 
     @property
     def get_hidden_size(self) -> int:
-        return getattr(self._metadata, "hidden_size")
+        return self._metadata.hidden_size
 
     @property
-    def get_context_size(self) -> Optional[int]:
+    def get_context_size(self) -> int | None:
         return self._effective_max_length
 
 
@@ -163,14 +162,14 @@ class Vectorizer(BaseVectorizer):
     model_name: str
     col_name: str
     device: str = Field(default_factory=detect_device)
-    max_length: Optional[int] = None
+    max_length: int | None = None
 
     _metadata: Any = PrivateAttr()
     _tokenizer: Any = PrivateAttr()
     _model: Any = PrivateAttr()
     _stride: int = PrivateAttr()
     _effective_max_length: int = PrivateAttr()
-    chunk_sizes: Counter = Counter()
+    chunk_sizes: Counter = Field(default_factory=Counter)
 
     # Stride (chunk overlap) is a fixed fraction of the context window. Kept as a
     # named constant -- and persisted in the cache metadata via `get_stride` -- so a
@@ -187,7 +186,7 @@ class Vectorizer(BaseVectorizer):
         self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
         self._model = AutoModel.from_pretrained(self.model_name).to(self.device).eval()
 
-        max_pos = getattr(self._metadata, "max_position_embeddings")
+        max_pos = self._metadata.max_position_embeddings
         self._effective_max_length = (
             min(max_pos, self.max_length) if self.max_length else max_pos
         )
@@ -362,7 +361,7 @@ class ImageVectorizer(BaseVectorizer):
     _processor: Any = PrivateAttr()
     _model: Any = PrivateAttr()
     _hidden_size: int = PrivateAttr()
-    _effective_max_length: Optional[int] = PrivateAttr(default=None)
+    _effective_max_length: int | None = PrivateAttr(default=None)
 
     @model_validator(mode="after")
     def initialize_model(self):
@@ -479,7 +478,7 @@ class PatchImageVectorizer(ImageVectorizer):
     """
 
     col_name: str = "patches"
-    drop_prefix_tokens: Optional[int] = None
+    drop_prefix_tokens: int | None = None
     """How many leading non-patch tokens (CLS, registers) to drop from a ViT's
     sequence. ``None`` infers it by checking which count leaves a square grid."""
 
@@ -506,7 +505,7 @@ class PatchImageVectorizer(ImageVectorizer):
         """
         if self.drop_prefix_tokens is not None:
             return self.drop_prefix_tokens
-        for prefix in range(0, 9):
+        for prefix in range(9):
             n = seq_len - prefix
             if n > 0 and isqrt(n) ** 2 == n:
                 return prefix
@@ -551,7 +550,7 @@ class PatchImageVectorizer(ImageVectorizer):
         }
 
     @property
-    def get_grid(self) -> Optional[tuple[int, int]]:
+    def get_grid(self) -> tuple[int, int] | None:
         """(rows, cols) of the patch grid -- needed to fold ``(C, D)`` back into a map."""
         return self._grid
 
@@ -563,7 +562,7 @@ class RegexVectorizer(BaseVectorizer):
 
     model_name: str = "regex_vectorizer"
     col_name: str = "regex_features"
-    training_texts: Optional[list[str]] = Field(
+    training_texts: list[str] | None = Field(
         default=None, description="Texts to fit on during initialization"
     )
     min_doc_frequency: int = Field(
@@ -589,8 +588,8 @@ class RegexVectorizer(BaseVectorizer):
 
     _pattern_to_idx: dict[str, int] = PrivateAttr()
     _compiled_pattern: re.Pattern = PrivateAttr()
-    _match_counts: Optional[Counter] = PrivateAttr(default=None)
-    _doc_frequencies: Optional[Counter] = PrivateAttr(default=None)
+    _match_counts: Counter | None = PrivateAttr(default=None)
+    _doc_frequencies: Counter | None = PrivateAttr(default=None)
 
     @model_validator(mode="after")
     def initialize_model(self):
@@ -702,7 +701,7 @@ class RegexVectorizer(BaseVectorizer):
         return {self.col_name: vectors}
 
     def print_stats(
-        self, texts: Optional[list[str]] = None, top_k: int = 20, plot: bool = True
+        self, texts: list[str] | None = None, top_k: int = 20, plot: bool = True
     ):
         if texts is None:
             if self._match_counts is None:

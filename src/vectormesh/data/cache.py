@@ -4,15 +4,13 @@ import shutil
 import tempfile
 import uuid
 from collections import Counter
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import (
     Any,
-    Callable,
     Generic,
-    Optional,
     TypeVar,
-    Union,
     get_args,
     get_type_hints,
 )
@@ -35,10 +33,10 @@ from .vectorizers import BaseVectorizer
 
 TVectorizer = TypeVar("TVectorizer", bound=BaseVectorizer)
 
-__all__ = ["VectorCache", "META_NON_COLUMN_KEYS", "HubUpload"]
+__all__ = ["META_NON_COLUMN_KEYS", "HubUpload", "VectorCache"]
 
 
-class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
+class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):  # noqa: PYI059, UP046 -- the base order is the MRO the cache is built on
     """A `dataset`-less or `metadata`-less instance is not a usable cache, so both
     are required rather than Optional -- `create()` and `load()` are the only two
     constructors and both always supply real values for both fields."""
@@ -55,11 +53,11 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
         vectorizer: TVectorizer,
         dataset: Dataset,
         dataset_tag: str = "default",
-        features: Optional[Features] = None,
+        features: Features | None = None,
         vector_batch: int = 32,
         map_batch: int = 32,
-        column_name: Optional[str] = None,
-        remove_columns: Optional[list[str]] = None,
+        column_name: str | None = None,
+        remove_columns: list[str] | None = None,
     ) -> "VectorCache[TVectorizer]":
         """
         Args:
@@ -94,7 +92,7 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
         for col in remove_columns or []:
             features.pop(col, None)
 
-        now = datetime.now().strftime("%Y%m%d%H%M%S")
+        now = datetime.now().astimezone().strftime("%Y%m%d%H%M%S")
         cachetag = f"{now}_{dataset_tag}_{column_name}"
         filepath = cache_dir / cachetag
         logger.info(f"Starting {cachetag}")
@@ -128,7 +126,7 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
         )
 
     @staticmethod
-    def _resolve_column(vectorizer, column_name: Optional[str]) -> str:
+    def _resolve_column(vectorizer, column_name: str | None) -> str:
         """Pick the output column: the explicit override, else vectorizer.col_name."""
         if column_name is None:
             if not vectorizer.col_name:
@@ -146,7 +144,7 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
         features: Features,
         vector_batch: int,
         map_batch: int,
-        remove_columns: Optional[list[str]],
+        remove_columns: list[str] | None,
     ) -> Dataset:
         """Map the vectorizer over the dataset, reading from vectorizer.input_col."""
         return dataset.map(
@@ -169,7 +167,7 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
         features: Features,
         vector_batch: int,
         map_batch: int,
-        remove_columns: Optional[list[str]],
+        remove_columns: list[str] | None,
     ) -> str:
         """Fingerprint the map() above from what actually identifies its output.
 
@@ -222,7 +220,7 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
         column_name: str,
         features: Features,
         num_observations: int,
-        dataset: Optional[Dataset] = None,
+        dataset: Dataset | None = None,
     ) -> dict:
         """Assemble the metadata dict describing this vectorizer's output column.
 
@@ -255,7 +253,7 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
                 "chunk_sizes": chunk_sizes,
             },
             "features": list(features.keys()),
-            "created_at": datetime.now().isoformat(),
+            "created_at": datetime.now().astimezone().isoformat(),
             "num_observations": num_observations,
         }
 
@@ -299,9 +297,9 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
         cls,
         repo_id: str,
         split: str = "train",
-        revision: Optional[str] = None,
-        token: Optional[str] = None,
-        cache_dir: Optional[Path] = None,
+        revision: str | None = None,
+        token: str | None = None,
+        cache_dir: Path | None = None,
     ) -> "VectorCache[TVectorizer]":
         """Download a published cache from the HuggingFace hub and load one split.
 
@@ -384,7 +382,7 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
         return f"{org}/{dataset_name}-{str(tag).split('/')[-1]}"
 
     def _resolve_repo_id(
-        self, repo_id: Optional[str], org: Optional[str], dataset_name: Optional[str]
+        self, repo_id: str | None, org: str | None, dataset_name: str | None
     ) -> str:
         """Take the repo id as given, or derive it from `(org, dataset_name)`."""
         if repo_id and (org or dataset_name):
@@ -404,18 +402,18 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
 
     def push_to_hub(
         self,
-        repo_id: Optional[str] = None,
+        repo_id: str | None = None,
         split: str = "train",
         *,
-        org: Optional[str] = None,
-        dataset_name: Optional[str] = None,
-        source_dataset: Optional[str] = None,
-        drop_columns: Optional[list[str]] = None,
-        card: Optional[str] = None,
+        org: str | None = None,
+        dataset_name: str | None = None,
+        source_dataset: str | None = None,
+        drop_columns: list[str] | None = None,
+        card: str | None = None,
         write_card: bool = True,
         license: str = "other",
         private: bool = False,
-        token: Optional[str] = None,
+        token: str | None = None,
         dry_run: bool = False,
     ) -> HubUpload:
         """Publish this cache to the HuggingFace hub as one split of a dataset repo.
@@ -562,7 +560,7 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
 
     @staticmethod
     def _upload(
-        repo_id: str, split: str, staged: Path, private: bool, token: Optional[str]
+        repo_id: str, split: str, staged: Path, private: bool, token: str | None
     ) -> None:
         """Create the repo if needed and upload the staged split folder."""
         from huggingface_hub import HfApi
@@ -587,7 +585,7 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
             ) from e
 
     @staticmethod
-    def _upload_card(repo_id: str, card: str, token: Optional[str]) -> None:
+    def _upload_card(repo_id: str, card: str, token: str | None) -> None:
         """Write README.md. A failed card is not a failed publish."""
         from huggingface_hub import HfApi
 
@@ -599,12 +597,12 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
                 repo_type="dataset",
                 commit_message="dataset card",
             )
-        except Exception as e:  # pragma: no cover - network path
+        except Exception as e:  # noqa: BLE001  # pragma: no cover - network path
             logger.warning(f"data uploaded, but the dataset card failed: {e}")
 
     @classmethod
     def _card_splits(
-        cls, repo_id: str, split: str, metadata: dict, token: Optional[str]
+        cls, repo_id: str, split: str, metadata: dict, token: str | None
     ) -> dict[str, dict]:
         """Metadata per split for the card: this one, plus any already in the repo.
 
@@ -628,7 +626,7 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
                 )
                 with open(path) as f:
                     splits[other] = json.load(f)
-            except Exception as e:  # pragma: no cover - network path
+            except Exception as e:  # noqa: BLE001  # pragma: no cover - network path
                 logger.warning(
                     f"could not read {other}/metadata.json for the card: {e}"
                 )
@@ -650,8 +648,8 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
         cache_dir: Path,
         dataset_tag: str,
         vectorizer: TVectorizer,
-        dataset: "Union[Dataset, Callable[[], Dataset]]",
-        remove_columns: Optional[list[str]] = None,
+        dataset: "Dataset | Callable[[], Dataset]",
+        remove_columns: list[str] | None = None,
     ) -> "VectorCache[TVectorizer]":
         """Load the cache for (dataset_tag, this vectorizer's encoder) if one is on
         disk; build it otherwise.
@@ -724,7 +722,7 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
 
     @staticmethod
     def _hub_splits(
-        repo_id: str, revision: Optional[str] = None, token: Optional[str] = None
+        repo_id: str, revision: str | None = None, token: str | None = None
     ) -> list[str]:
         """Split folders present in a hub cache repo. Error paths only."""
         try:
@@ -734,7 +732,7 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
                 repo_id, repo_type="dataset", revision=revision, token=token
             )
             return sorted({f.split("/")[0] for f in files if f.endswith("/state.json")})
-        except Exception:  # pragma: no cover - best-effort hint
+        except Exception:  # noqa: BLE001  # pragma: no cover - best-effort hint
             return []
 
     @property
@@ -786,8 +784,8 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
         self,
         other: "VectorCache",
         on: str = "source_idx",
-        column: Optional[str] = None,
-        into: Optional[str] = None,
+        column: str | None = None,
+        into: str | None = None,
     ) -> "VectorCache[TVectorizer]":
         """Bring another cache's vector column onto this one, aligned row-for-row on `on`.
 
@@ -853,13 +851,16 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
         # The check worth having: if both sides carry labels and they disagree after
         # alignment, the join is wrong in a way that would otherwise train quietly.
         for shared in ("label", "labels"):
-            if shared in left.column_names and shared in aligned.column_names:
-                if list(left[shared]) != list(aligned[shared]):
-                    raise VectorMeshError(
-                        f"{shared!r} disagrees between the two caches after aligning on "
-                        f"{on!r}. They are not describing the same rows -- check that "
-                        "both were built from the same source dataset revision."
-                    )
+            if (
+                shared in left.column_names
+                and shared in aligned.column_names
+                and list(left[shared]) != list(aligned[shared])
+            ):
+                raise VectorMeshError(
+                    f"{shared!r} disagrees between the two caches after aligning on "
+                    f"{on!r}. They are not describing the same rows -- check that "
+                    "both were built from the same source dataset revision."
+                )
 
         joined = left.add_column(into, list(aligned[column]))
         joined.set_format(type="torch")
@@ -876,7 +877,7 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
             metadata=metadata,
         )
 
-    def _resolve_join_column(self, column: Optional[str]) -> str:
+    def _resolve_join_column(self, column: str | None) -> str:
         """Which column of this cache a join should take."""
         if column is not None:
             if column not in self.dataset.column_names:
@@ -931,7 +932,7 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):
         return_type = hints[
             "return"
         ]  # dict[str, list[jaxtyping.Float[Tensor, '_ dim']]]
-        key, values = get_args(
+        _, values = get_args(
             return_type
         )  # (str, list[jaxtyping.Float[Tensor, '_ dim']])
         valua_args = get_args(values)  # (jaxtyping.Float[Tensor, '_ dim'],)

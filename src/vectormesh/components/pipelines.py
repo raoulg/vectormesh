@@ -1,10 +1,9 @@
 import copy
 
 import torch
-import torch.nn as nn
-from torch import Tensor
 from beartype import beartype
 from jaxtyping import jaxtyped
+from torch import Tensor, nn
 
 from vectormesh.types import TensorInput
 
