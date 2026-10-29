@@ -1,29 +1,9 @@
-from abc import abstractmethod
-
 import torch
-import torch.nn as nn
 from beartype import beartype
 from jaxtyping import Float, jaxtyped
-from torch import Tensor
+from torch import Tensor, nn
 
-from vectormesh.types import BaseComponent
-
-
-class BaseAggregator(BaseComponent):
-    """Base class for aggregating 3D -> 2D tensors.
-    We use "forward" to be compatible with nn.Module
-    """
-
-    def __init__(self):
-        super().__init__()
-
-    @abstractmethod
-    @jaxtyped(typechecker=beartype)
-    def forward(
-        self, tensors: Float[Tensor, "batch _ dim"]
-    ) -> Float[Tensor, "batch dim"]:
-        """Aggregate from (batch, chunks, dim) to (batch, dim)."""
-        ...
+from vectormesh.components.contracts import BaseAggregator
 
 
 class MeanAggregator(BaseAggregator):

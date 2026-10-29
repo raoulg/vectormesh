@@ -1,12 +1,14 @@
-import torch.nn as nn
+from itertools import pairwise
+
 from beartype import beartype
 from jaxtyping import Bool, Float, jaxtyped
-from torch import Tensor
+from torch import Tensor, nn
 
-from vectormesh.types import BaseComponent, VectorMeshError
+from vectormesh.components.contracts import RankPolymorphicComponent, SequenceComponent
+from vectormesh.types import VectorMeshError
 
 
-class NeuralNet(BaseComponent):
+class NeuralNet(RankPolymorphicComponent):
     """Feedforward network with GELU activations, two layers by default.
 
     Acts on the last dimension, so it accepts any leading shape: ``(batch, hidden)``
@@ -53,9 +55,7 @@ class NeuralNet(BaseComponent):
         self.widths = widths  # the full input->hidden chain, excluding out_size
 
         all_widths = [*widths, out_size]
-        self.layers = nn.ModuleList(
-            nn.Linear(a, b) for a, b in zip(all_widths, all_widths[1:])
-        )
+        self.layers = nn.ModuleList(nn.Linear(a, b) for a, b in pairwise(all_widths))
         self.activation = nn.GELU()
 
     @jaxtyped(typechecker=beartype)
@@ -69,7 +69,7 @@ class NeuralNet(BaseComponent):
         return layers[-1](x)
 
 
-class Projection(BaseComponent):
+class Projection(RankPolymorphicComponent):
     """Linear projection layer."""
 
     def __init__(self, hidden_size: int, out_size: int):
@@ -85,7 +85,7 @@ class Projection(BaseComponent):
         return self.proj(tensors)
 
 
-class Attention(nn.Module):
+class Attention(SequenceComponent):
     """Multi-head self-attention using PyTorch's implementation."""
 
     def __init__(self, hidden_size: int, num_heads: int = 8, dropout: float = 0.1):
@@ -106,7 +106,7 @@ class Attention(nn.Module):
         return attn_output
 
 
-class TransformerBlock(BaseComponent):
+class TransformerBlock(SequenceComponent):
     """A minimal pre-norm transformer block: attention + feed-forward, each with
     a residual connection.
 

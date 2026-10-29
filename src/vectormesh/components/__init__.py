@@ -2,13 +2,19 @@
 
 from .aggregation import (
     AttentionAggregator,
-    BaseAggregator,
     MaskedMeanAggregator,
     MeanAggregator,
     RNNAggregator,
 )
 from .augmentation import GaussianNoise
 from .connectors import Concatenate2D, Concatenate3D, Stack2D
+from .contracts import (
+    BaseAggregator,
+    Connector,
+    RankPolymorphicComponent,
+    SequenceComponent,
+    VectorComponent,
+)
 from .gating import Gate, Highway, MoE, Skip, SparseMoE
 from .metrics import RepresentationStd
 from .neural import Attention, NeuralNet, Projection, TransformerBlock
@@ -22,6 +28,7 @@ __all__ = [
     "BaseAggregator",
     "Concatenate2D",
     "Concatenate3D",
+    "Connector",
     "DynamicPadding",
     "FixedPadding",
     "Gate",
@@ -35,11 +42,14 @@ __all__ = [
     "Parallel",
     "Projection",
     "RNNAggregator",
+    "RankPolymorphicComponent",
     "RepresentationStd",
+    "SequenceComponent",
     "Serial",
     "Siamese",
     "Skip",
     "SparseMoE",
     "Stack2D",
     "TransformerBlock",
+    "VectorComponent",
 ]

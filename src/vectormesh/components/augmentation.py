@@ -12,10 +12,10 @@ from beartype import beartype
 from jaxtyping import Float, jaxtyped
 from torch import Tensor
 
-from vectormesh.types import BaseComponent
+from vectormesh.components.contracts import RankPolymorphicComponent
 
 
-class GaussianNoise(BaseComponent):
+class GaussianNoise(RankPolymorphicComponent):
     """Add Gaussian noise to embeddings during training (a no-op at eval).
 
     Acts on the last dimension, so it accepts any leading shape -- ``(batch, dim)``
@@ -38,7 +38,9 @@ class GaussianNoise(BaseComponent):
         self.relative = relative
 
     @jaxtyped(typechecker=beartype)
-    def forward(self, tensors: Float[Tensor, "..."]) -> Float[Tensor, "..."]:
+    def forward(
+        self, tensors: Float[Tensor, "*lead dim"]
+    ) -> Float[Tensor, "*lead dim"]:
         if not self.training or self.sigma == 0:
             return tensors
         noise = torch.randn_like(tensors)

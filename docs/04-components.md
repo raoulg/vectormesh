@@ -2,6 +2,10 @@
 
 Source: `src/vectormesh/components/`. Everything here is an `nn.Module`; most inherit
 `BaseComponent` (`types.py`), which adds nothing but an abstract `forward` returning a tensor.
+A component with a shape contract inherits it from its family in `contracts.py` —
+`VectorComponent`, `SequenceComponent`, `RankPolymorphicComponent`, `BaseAggregator` or
+`Connector` — so the class says which rung of the ladder it works on; see
+[§2.6](02-tensor-contracts.md#26-families-the-rung-is-the-class).
 
 Shorthand used below: `B` = batch, `C` = chunks, `D` = dim.
 
@@ -133,7 +137,9 @@ Three things worth knowing:
 
 ## 4.5 Connectors — `connectors.py`
 
-Consume the tuple that a `Parallel` returns; produce a single tensor.
+Consume the tuple that a `Parallel` returns; produce a single tensor. All three are
+`Connector`s: `forward(tensors)` hands the tuple on as `connect(*tensors)`, so every branch is
+checked and the named axes bind across branches.
 
 | Class | Input | Output |
 |---|---|---|
@@ -164,7 +170,7 @@ y = transform(norm(x)) + (projection(norm(x)) if projection else norm(x))
 ```
 
 Pre-norm residual connection. `projection` is needed only when `transform` changes the
-dimension. Annotated `"..."` — works at any rank.
+dimension. Annotated `"... {self.in_size}"` — works at any rank.
 
 ### `Gate(hidden_size)`
 
@@ -229,7 +235,8 @@ a genuine regulariser for a small head trained on few examples.
 feature axis, so one `sigma` behaves consistently across encoders whose embeddings live on
 different scales (a ResNet pooler vs. a DINOv2 CLS vector).
 
-Annotated `"..."`, shape-preserving, so it drops straight in front of a head:
+Annotated `"*lead dim"` on both sides, shape-preserving, so it drops straight in front of a
+head:
 
 ```python
 Serial([GaussianNoise(sigma=0.1), NeuralNet(hidden_size, n_classes)])

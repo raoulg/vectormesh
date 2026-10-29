@@ -158,7 +158,34 @@ class BaseVectorizer(ABC, Cachable):
         return self._effective_max_length
 
 
-class Vectorizer(BaseVectorizer):
+class ItemVectorizer(BaseVectorizer):
+    """A vectorizer that turns every item into one vector, ``(dim,)``.
+
+    Its cache has ``tensordtype == 1`` and is collated with ``torch.stack``.
+    """
+
+    @abstractmethod
+    @jaxtyped(typechecker=beartype)
+    def __call__(
+        self, inputs: list, batchsize: int
+    ) -> dict[str, list[Float[Tensor, "dim"]]]: ...
+
+
+class ChunkedVectorizer(BaseVectorizer):
+    """A vectorizer that turns every item into a matrix of chunk vectors, ``(chunks, dim)``.
+
+    The chunk count may differ per item, hence the anonymous axis. Its cache has
+    ``tensordtype == 2`` and is collated with a padder.
+    """
+
+    @abstractmethod
+    @jaxtyped(typechecker=beartype)
+    def __call__(
+        self, inputs: list, batchsize: int
+    ) -> dict[str, list[Float[Tensor, "_ dim"]]]: ...
+
+
+class Vectorizer(ChunkedVectorizer):
     model_name: str
     col_name: str
     device: str = Field(default_factory=detect_device)
@@ -341,10 +368,11 @@ class _ImageModelVectorizer(BaseVectorizer):
     ``facebook/dinov2-small``), run over batches of images.
 
     How the model's output becomes vectors is each vectorizer's own -- one per image
-    (:class:`ImageVectorizer`) or one per patch (:class:`PatchImageVectorizer`) -- and
-    so is the shape its ``__call__`` declares, which ``VectorCache`` reads the rank of
-    the cache from. The two are siblings: a pipeline built on one rank does not take
-    the other, so neither stands in for the other.
+    (:class:`ImageVectorizer`, an :class:`ItemVectorizer`) or one per patch
+    (:class:`PatchImageVectorizer`, a :class:`ChunkedVectorizer`) -- and so is the shape
+    its ``__call__`` declares, which ``VectorCache`` reads the rank of the cache from. The
+    two are siblings: a pipeline built on one rank does not take the other, so neither
+    stands in for the other.
 
     The model is only ever run to fill the VectorCache, so the (one-time) cost scales
     with model size while training the head on the cached vectors stays cheap on CPU.
@@ -429,7 +457,7 @@ class _ImageModelVectorizer(BaseVectorizer):
         return self._processor
 
 
-class ImageVectorizer(_ImageModelVectorizer):
+class ImageVectorizer(_ImageModelVectorizer, ItemVectorizer):
     """
     Image vectorizer that pools every image down to one vector, shape ``(dim,)``.
 
@@ -470,7 +498,7 @@ class ImageVectorizer(_ImageModelVectorizer):
         return {self.col_name: self._vectorize(inputs, batchsize)}
 
 
-class PatchImageVectorizer(_ImageModelVectorizer):
+class PatchImageVectorizer(_ImageModelVectorizer, ChunkedVectorizer):
     """
     Image vectorizer that **keeps** the patch axis: ``(C, D)`` per image.
 
@@ -567,9 +595,10 @@ class _RegexFeatures(BaseVectorizer):
     that vocabulary.
 
     Which texts get a vector is each vectorizer's own -- a whole document
-    (:class:`RegexVectorizer`) or each chunk of an embedder's chunking
-    (:class:`ChunkedRegexVectorizer`) -- and so is the shape its ``__call__``
-    declares. The two are siblings: neither stands in for the other.
+    (:class:`RegexVectorizer`, an :class:`ItemVectorizer`) or each chunk of an
+    embedder's chunking (:class:`ChunkedRegexVectorizer`, a :class:`ChunkedVectorizer`)
+    -- and so is the shape its ``__call__`` declares. The two are siblings: neither
+    stands in for the other.
     """
 
     training_texts: list[str] | None = Field(
@@ -790,7 +819,7 @@ class _RegexFeatures(BaseVectorizer):
         return fields
 
 
-class RegexVectorizer(_RegexFeatures):
+class RegexVectorizer(_RegexFeatures, ItemVectorizer):
     """
     Vectorizer that creates binary feature vectors based on regex pattern matches,
     one ``(hidden_size,)`` vector per document.
@@ -808,7 +837,7 @@ class RegexVectorizer(_RegexFeatures):
         return {self.col_name: vectors}
 
 
-class ChunkedRegexVectorizer(_RegexFeatures):
+class ChunkedRegexVectorizer(_RegexFeatures, ChunkedVectorizer):
     """Regex vectorizer that aligns its binary features with an embedder's chunks.
 
     Where ``RegexVectorizer`` emits one ``(hidden_size,)`` vector per document, this
@@ -912,7 +941,7 @@ class ChunkedRegexVectorizer(_RegexFeatures):
     @jaxtyped(typechecker=beartype)
     def __call__(
         self, inputs: list[str], batchsize: int = 32
-    ) -> dict[str, list[Float[Tensor, "chunks hidden_size"]]]:
+    ) -> dict[str, list[Float[Tensor, "_ hidden_size"]]]:
         self._require_fit()
 
         if not self._supports_offsets:

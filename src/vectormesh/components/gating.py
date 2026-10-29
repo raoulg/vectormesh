@@ -1,19 +1,18 @@
 """Residual and gating components for skip connections and gated transformations."""
 
 from collections.abc import Sequence
-from typing import Optional
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from beartype import beartype
 from jaxtyping import Float, jaxtyped
-from torch import Tensor
+from torch import Tensor, nn
 
-from vectormesh.types import BaseComponent, VectorMeshError
+from vectormesh.components.contracts import RankPolymorphicComponent, VectorComponent
+from vectormesh.types import VectorMeshError
 
 
-class Skip(BaseComponent):
+class Skip(RankPolymorphicComponent):
     """Residual skip connection: output = batchnorm(transform(x) + projection(x))
     - transform is the pipeline we want to apply to the input
     - in_size is the dimensionality of the input; we need this for the layernorm
@@ -22,22 +21,25 @@ class Skip(BaseComponent):
     """
 
     transform: nn.Module
-    projection: Optional[nn.Module]
+    projection: nn.Module | None
     layernorm: nn.LayerNorm
 
     def __init__(
         self,
         transform: nn.Module,
         in_size: int,
-        projection: Optional[nn.Module] = None,
+        projection: nn.Module | None = None,
     ):
         super().__init__()
+        self.in_size = in_size
         self.transform = transform
         self.projection = projection
         self.layernorm = nn.LayerNorm(in_size)
 
     @jaxtyped(typechecker=beartype)
-    def forward(self, tensors: Float[Tensor, "..."]) -> Float[Tensor, "..."]:
+    def forward(
+        self, tensors: Float[Tensor, "... {self.in_size}"]
+    ) -> Float[Tensor, "... out"]:
         # pre-norm (instead of post-norm) improves stability
         tensors = self.layernorm(tensors)
         residual = self.projection(tensors) if self.projection else tensors
@@ -45,7 +47,7 @@ class Skip(BaseComponent):
         return transformed + residual
 
 
-class Gate(BaseComponent):
+class Gate(VectorComponent):
     """Simple gating: output = sigmoid(W·x) * x"""
 
     def __init__(self, hidden_size: int):
@@ -59,7 +61,7 @@ class Gate(BaseComponent):
         return F.sigmoid(self.project(tensors)) * tensors
 
 
-class Highway(BaseComponent):
+class Highway(VectorComponent):
     """Highway network: G * T(x) + (1-G) * x"""
 
     def __init__(self, transform: nn.Module, hidden_size: int):
@@ -79,7 +81,7 @@ class Highway(BaseComponent):
         return gate * transformed + (1 - gate) * tensors
 
 
-class MoE(BaseComponent):
+class MoE(RankPolymorphicComponent):
     """Dense mixture of experts: a softmax-weighted blend of all experts.
 
     The natural "multi-gate" generalisation of the gating family in this module::
@@ -125,7 +127,7 @@ class MoE(BaseComponent):
         return (gates.unsqueeze(-1) * expert_outputs).sum(dim=-2)
 
 
-class SparseMoE(BaseComponent):
+class SparseMoE(RankPolymorphicComponent):
     """Sparse (top-k) mixture of experts: each example activates only its top-k
     experts, and -- unlike `MoE` above -- only those experts actually run on it.
 

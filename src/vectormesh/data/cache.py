@@ -927,7 +927,7 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):  # noqa: P
         return features
 
     @staticmethod
-    def get_dtensor(vectorizer: BaseVectorizer) -> int:
+    def get_dtensor(vectorizer: BaseVectorizer | type[BaseVectorizer]) -> int:
         hints = get_type_hints(vectorizer.__call__)
         return_type = hints[
             "return"

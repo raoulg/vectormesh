@@ -186,15 +186,14 @@ def test_join_result_feeds_collate_parallel(tmp_path, left):
             NeuralNet(10, 2),
         ]
     )
-    (x1, x2), y = next(iter(loader))
+    (x1, x2), _ = next(iter(loader))
     assert x1.shape == (2, DIM_A) and x2.shape == (2, DIM_B)
     assert pipeline((x1, x2)).shape == (2, 2)
 
 
 def test_concatenate2d_accepts_unequal_widths():
-    """Regression: a *named* axis binds across a variadic tuple, so `"batch dim"`
-    silently required every branch to be the same width -- rejecting the case the
-    component exists for."""
+    """Every branch is an argument of `connect`, so a *named* width would bind across
+    branches and reject the case the component exists for; the width axis is `_`."""
     from vectormesh.components import Concatenate2D
 
     out = Concatenate2D()((torch.rand(3, 384), torch.rand(3, 512)))

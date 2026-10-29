@@ -5,11 +5,13 @@ from loguru import logger
 
 from vectormesh.data import (
     BaseVectorizer,
+    ChunkedRegexVectorizer,
+    ChunkedVectorizer,
     HubUpload,
     ImageVectorizer,
-    PatchImageVectorizer,
-    ChunkedRegexVectorizer,
+    ItemVectorizer,
     LabelEncoder,
+    PatchImageVectorizer,
     RegexVectorizer,
     VectorCache,
     Vectorizer,
@@ -27,22 +29,24 @@ from vectormesh.training import (
 __version__ = version("vectormesh")
 
 __all__ = [
-    "VectorCache",
-    "HubUpload",
-    "LabelEncoder",
-    "build",
     "BaseVectorizer",
-    "Vectorizer",
+    "ChunkedRegexVectorizer",
+    "ChunkedVectorizer",
+    "EarlyStopping",
+    "HubUpload",
     "ImageVectorizer",
+    "ItemVectorizer",
+    "LabelEncoder",
     "PatchImageVectorizer",
     "RegexVectorizer",
-    "ChunkedRegexVectorizer",
-    "Trainer",
-    "TrainerSettings",
-    "EarlyStopping",
     "Reporter",
     "Step",
     "TrainResult",
+    "Trainer",
+    "TrainerSettings",
+    "VectorCache",
+    "Vectorizer",
+    "build",
 ]
 
 logger.remove()

@@ -8,16 +8,18 @@ Signatures as implemented in `src/vectormesh/` (version 0.3.0). `B` = batch, `C`
 ## 7.1 Top level — `from vectormesh import ...`
 
 ```
-VectorCache, Vectorizer, ImageVectorizer, RegexVectorizer, ChunkedRegexVectorizer,
-BaseVectorizer, LabelEncoder, build, __version__,
+VectorCache, Vectorizer, ImageVectorizer, PatchImageVectorizer, RegexVectorizer,
+ChunkedRegexVectorizer, BaseVectorizer, ItemVectorizer, ChunkedVectorizer, HubUpload,
+LabelEncoder, build, __version__,
 Trainer, TrainerSettings, EarlyStopping, Reporter, Step, TrainResult
 ```
 
 ## 7.2 Data — `from vectormesh.data import ...`
 
 ```
-VectorCache, DatasetSchema, OneHot, Collate, CollateParallel, LabelEncoder, build,
-BaseVectorizer, Vectorizer, ImageVectorizer, RegexVectorizer, ChunkedRegexVectorizer
+VectorCache, DatasetSchema, OneHot, Collate, CollateParallel, LabelEncoder, build, HubUpload,
+BaseVectorizer, ItemVectorizer, ChunkedVectorizer,
+Vectorizer, ImageVectorizer, PatchImageVectorizer, RegexVectorizer, ChunkedRegexVectorizer
 ```
 
 Not re-exported, import from the module: `detect_device`, `build_legal_reference_pattern`,
@@ -28,14 +30,18 @@ Not re-exported, import from the module: `detect_device`, `build_legal_reference
 ## 7.3 Components — `from vectormesh.components import ...`
 
 ```
-Serial, Parallel,
+VectorComponent, SequenceComponent, RankPolymorphicComponent, BaseAggregator, Connector,
+Serial, Parallel, Lift, Siamese, JEPA,
 FixedPadding, DynamicPadding,
-BaseAggregator, MeanAggregator, MaskedMeanAggregator, AttentionAggregator, RNNAggregator,
+MeanAggregator, MaskedMeanAggregator, AttentionAggregator, RNNAggregator,
 NeuralNet, Projection, Attention, TransformerBlock,
 Concatenate2D, Concatenate3D, Stack2D,
-Skip, Gate, Highway, MoE,
-GaussianNoise
+Skip, Gate, Highway, MoE, SparseMoE,
+GaussianNoise, RepresentationStd
 ```
+
+The first line lists the families (`components/contracts.py`); every other component with a shape
+contract is a member of one — see [§7.7](#77-components).
 
 Metrics live in `vectormesh.components.metrics` and are **not** in `components.__all__`:
 `Metric, Accuracy, F1Score, MAE, MASE`.
@@ -58,7 +64,14 @@ Abstract: `initialize_model()`, `__call__(inputs: list, batchsize: int)`.
 Also: `fingerprint_fields() -> dict` (what the cache hashes; every public field by default,
 minus the names in the `FINGERPRINT_EXCLUDE` class var).
 
-### `Vectorizer(BaseVectorizer)`
+### Families: `ItemVectorizer(BaseVectorizer)`, `ChunkedVectorizer(BaseVectorizer)`
+
+Abstract. They fix the shape of one item: `ItemVectorizer.__call__` returns
+`dict[str, list[Float[Tensor, "dim"]]]` (cache `tensordtype == 1`), `ChunkedVectorizer.__call__`
+returns `dict[str, list[Float[Tensor, "_ dim"]]]` (cache `tensordtype == 2`). Every concrete
+vectorizer below is a member of one.
+
+### `Vectorizer(ChunkedVectorizer)`
 
 | Field | Type | Default |
 |---|---|---|
@@ -73,7 +86,7 @@ Class constant `STRIDE_DIVISOR = 10`. Extra properties: `get_model`, `get_tokeni
 `get_stride`. Public methods `tokenize`, `embed`, `aggregate`, `extend`. Attribute
 `chunk_sizes: Counter`.
 
-### `ImageVectorizer(BaseVectorizer)`
+### `ImageVectorizer(_ImageModelVectorizer, ItemVectorizer)`
 
 | Field | Type | Default |
 |---|---|---|
@@ -86,7 +99,7 @@ Class constant `STRIDE_DIVISOR = 10`. Extra properties: `get_model`, `get_tokeni
 
 Extra properties: `get_model`, `get_processor`.
 
-### `RegexVectorizer(BaseVectorizer)`
+### `RegexVectorizer(_RegexFeatures, ItemVectorizer)`
 
 | Field | Type | Default |
 |---|---|---|
@@ -102,9 +115,9 @@ Extra properties: `get_model`, `get_processor`.
 
 Methods: `fit(texts) -> RegexVectorizer`, `print_stats(texts=None, top_k=20, plot=True)`.
 
-### `ChunkedRegexVectorizer(RegexVectorizer)`
+### `ChunkedRegexVectorizer(_RegexFeatures, ChunkedVectorizer)`
 
-Adds:
+A sibling of `RegexVectorizer`, sharing its regex fields through `_RegexFeatures`. Adds:
 
 | Field | Type | Default |
 |---|---|---|
@@ -114,7 +127,7 @@ Adds:
 | `context_size` | `int` | required |
 | `stride` | `int` | required |
 
-`__call__(...) -> dict[str, list[Float[Tensor, "chunks hidden_size"]]]`
+`__call__(...) -> dict[str, list[Float[Tensor, "_ hidden_size"]]]`
 
 Extra properties: `get_stride`, `get_offsets_supported`.
 
@@ -224,28 +237,32 @@ Output folder name: `{YYYYMMDDHHMMSS}_{dataset_tag}_{column_name}`.
 
 ## 7.7 Components
 
-| Component | Constructor | Input → Output |
-|---|---|---|
-| `Serial` | `(components: list[nn.Module])` | passthrough |
-| `Parallel` | `(branches: list[nn.Module])` | tuple → tuple |
-| `FixedPadding` | `(max_chunks: int)` | `list[(C_i, D)]` → `(B, max_chunks, D)` |
-| `DynamicPadding` | `()` | `list[(C_i, D)]` → `(B, max C_i, D)` |
-| `MeanAggregator` | `()` | `(B, _, D)` → `(B, D)` |
-| `MaskedMeanAggregator` | `()` | `(B, _, D)` → `(B, D)` |
-| `AttentionAggregator` | `(hidden_size: int)` | `(B, _, D)` → `(B, D)` |
-| `RNNAggregator` | `(hidden_size: int)` | `(B, _, D)` → `(B, D)` |
-| `NeuralNet` | `(hidden_size: int, out_size: int)` | `(…, hidden)` → `(…, out)` |
-| `Projection` | `(hidden_size: int, out_size: int)` | `(…, hidden)` → `(…, out)` |
-| `Attention` | `(hidden_size, num_heads=8, dropout=0.1)` | `(B, seq, D)` → `(B, seq, D)` |
-| `TransformerBlock` | `(hidden_size, num_heads=8, dropout=0.1)` | `(B, seq, hidden)` → `(B, seq, hidden)`, shape-preserving |
-| `Concatenate2D` | `()` | `((B, D1), …)` → `(B, ΣD)` |
-| `Concatenate3D` | `()` | `((B, C, D1), …)` → `(B, C, ΣD)` |
-| `Stack2D` | `()` | `((B, D), …)` → `(B, n, D)` |
-| `Skip` | `(transform: nn.Module, in_size: int, projection: nn.Module \| None = None)` | `(…)` → `(…)` |
-| `Gate` | `(hidden_size: int)` | `(B, D)` → `(B, D)` |
-| `Highway` | `(transform: nn.Module, hidden_size: int)` | `(B, D)` → `(B, D)` |
-| `MoE` | `(experts: list[nn.Module], hidden_size: int, out_size: int)` | `(…, hidden)` → `(…, out)` |
-| `GaussianNoise` | `(sigma: float = 0.1, relative: bool = True)` | `(…)` → `(…)`, train-only |
+| Component | Family | Constructor | Input → Output |
+|---|---|---|---|
+| `Serial` | — | `(components: list[nn.Module])` | passthrough |
+| `Parallel` | — | `(branches: list[nn.Module])` | tuple → tuple |
+| `FixedPadding` | — (collate callable) | `(max_chunks: int)` | `list[(C_i, D)]` → `(B, max_chunks, D)` |
+| `DynamicPadding` | — (collate callable) | `()` | `list[(C_i, D)]` → `(B, max C_i, D)` |
+| `MeanAggregator` | `BaseAggregator` | `()` | `(B, _, D)` → `(B, D)` |
+| `MaskedMeanAggregator` | `BaseAggregator` | `()` | `(B, _, D)` → `(B, D)` |
+| `AttentionAggregator` | `BaseAggregator` | `(hidden_size: int)` | `(B, _, D)` → `(B, D)` |
+| `RNNAggregator` | `BaseAggregator` | `(hidden_size: int)` | `(B, _, D)` → `(B, D)` |
+| `NeuralNet` | `RankPolymorphicComponent` | `(hidden_size: int, out_size: int)` | `(…, hidden)` → `(…, out)` |
+| `Projection` | `RankPolymorphicComponent` | `(hidden_size: int, out_size: int)` | `(…, hidden)` → `(…, out)` |
+| `Attention` | `SequenceComponent` | `(hidden_size, num_heads=8, dropout=0.1)` | `(B, seq, D)` → `(B, seq, D)` |
+| `TransformerBlock` | `SequenceComponent` | `(hidden_size, num_heads=8, dropout=0.1)` | `(B, seq, hidden)` → `(B, seq, hidden)`, shape-preserving |
+| `Concatenate2D` | `Connector` | `()` | `((B, D1), …)` → `(B, ΣD)` |
+| `Concatenate3D` | `Connector` | `()` | `((B, C, D1), …)` → `(B, C, ΣD)` |
+| `Stack2D` | `Connector` | `()` | `((B, D), …)` → `(B, n, D)` |
+| `Skip` | `RankPolymorphicComponent` | `(transform: nn.Module, in_size: int, projection: nn.Module \| None = None)` | `(…, in_size)` → `(…, out)` |
+| `Gate` | `VectorComponent` | `(hidden_size: int)` | `(B, D)` → `(B, D)` |
+| `Highway` | `VectorComponent` | `(transform: nn.Module, hidden_size: int)` | `(B, D)` → `(B, D)` |
+| `MoE` | `RankPolymorphicComponent` | `(experts: list[nn.Module], hidden_size: int, out_size: int)` | `(…, hidden)` → `(…, out)` |
+| `SparseMoE` | `RankPolymorphicComponent` | `(experts: Sequence[nn.Module], hidden_size: int, out_size: int, k: int = 1)` | `(…, hidden)` → `(…, out)` |
+| `GaussianNoise` | `RankPolymorphicComponent` | `(sigma: float = 0.1, relative: bool = True)` | `(…, D)` → `(…, D)`, train-only |
+
+A `Connector`'s `forward(tensors)` calls `connect(*tensors)`; the shape contract is on
+`connect`, so every branch is checked.
 
 Note the keyword is `hidden_size` (not `in_size`) for `NeuralNet` and `Projection`; `Skip` is the
 one that takes `in_size`.
