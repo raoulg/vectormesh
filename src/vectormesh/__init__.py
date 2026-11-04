@@ -51,4 +51,3 @@ __all__ = [
 
 logger.remove()
 logger.add(sys.stderr, level="INFO")
-logger.add("logs/dataset.log", rotation="10 MB", level="DEBUG")

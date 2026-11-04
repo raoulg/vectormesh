@@ -33,6 +33,5 @@ dev/*
 *.log
 .lycheecache
 **/tmp/*
-**/demo/*
 .notebookcache/
 **/logs/*
