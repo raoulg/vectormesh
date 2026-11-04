@@ -82,12 +82,12 @@ src/vectormesh/
 │   ├── schema.py          # DatasetSchema: infer input/label column names
 │   └── dataset.py         # OneHot, Collate, CollateParallel, LabelEncoder, build()
 └── components/
-    ├── pipelines.py       # Serial, Parallel
+    ├── pipelines.py       # Serial, Parallel, Skip, Lift (architecture forms)
     ├── padding.py         # FixedPadding, DynamicPadding
     ├── aggregation.py     # Mean / MaskedMean / Attention / RNN aggregators (3D -> 2D)
     ├── neural.py          # NeuralNet, Projection, Attention, TransformerBlock
     ├── connectors.py      # Concatenate2D, Concatenate3D, Stack2D
-    ├── gating.py          # Skip, Gate, Highway, MoE
+    ├── gating.py          # Gate, Highway, MoE, SparseMoE
     ├── augmentation.py    # GaussianNoise (feature-space augmentation)
     └── metrics.py         # Accuracy, F1Score, MAE, MASE
 ```

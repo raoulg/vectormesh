@@ -88,14 +88,34 @@ image path are all covered in [The data layer](docs/03-data-layer.md).
 **Data** — `VectorCache`, `Vectorizer` (chunked text), `ImageVectorizer`, `RegexVectorizer`,
 `ChunkedRegexVectorizer`, `DatasetSchema`, `OneHot`, `Collate`, `CollateParallel`, `LabelEncoder`.
 
-**Components** — pipelines (`Serial`, `Parallel`), padding (`FixedPadding`, `DynamicPadding`),
-aggregation (`Mean`, `MaskedMean`, `Attention`, `RNN`), neural blocks (`NeuralNet`, `Projection`,
-`Attention`, `TransformerBlock`), connectors (`Concatenate2D`, `Concatenate3D`, `Stack2D`), gating
-(`Skip`, `Gate`, `Highway`, `MoE`), augmentation (`GaussianNoise`), metrics (`Accuracy`, `F1Score`,
-`MAE`, `MASE`).
+**Components** — architecture forms (`Serial`, `Parallel`, `Skip`), padding (`FixedPadding`,
+`DynamicPadding`), aggregation (`Mean`, `MaskedMean`, `Attention`, `RNN`), neural blocks
+(`NeuralNet`, `Projection`, `Attention`, `TransformerBlock`), connectors (`Concatenate2D`,
+`Concatenate3D`, `Stack2D`), gating (`Gate`, `Highway`, `MoE`, `SparseMoE`), augmentation
+(`GaussianNoise`), metrics (`Accuracy`, `F1Score`, `MAE`, `MASE`).
 
 Details and signatures: [Components](docs/04-components.md),
 [API reference](docs/07-api-reference.md).
+
+## Components by rank
+
+After collation a model works on two ranks: **2D `(B, D)`**, one vector per item, and **3D
+`(B, C, D)`**, a sequence per item. Every component does one thing to the rank, and its family
+(`components/contracts.py`) says which:
+
+| What it does to the rank | In → out | Components | Family |
+|---|---|---|---|
+| keeps it, any rank (works on the last axis) | `(*lead, D) → (*lead, D')` | `NeuralNet`, `Projection`, `Gate`, `Highway`, `MoE`, `SparseMoE`, `GaussianNoise` | `RankPolymorphicComponent` |
+| keeps it, 3D only | `(B, C, D) → (B, C, D')` | `Attention`, `TransformerBlock` | `SequenceComponent` |
+| lowers it | `(B, C, D) → (B, D)` | `MeanAggregator`, `MaskedMeanAggregator`, `AttentionAggregator`, `RNNAggregator` | `BaseAggregator` |
+| joins a tuple, keeps the rank | `(B, D₁), (B, D₂) → (B, D₁+D₂)` | `Concatenate2D` | `Connector` |
+| | `(B, C, D₁), (B, C, D₂) → (B, C, D₁+D₂)` | `Concatenate3D` | `Connector` |
+| joins a tuple, raises the rank | `(B, D), (B, D) → (B, N, D)` | `Stack2D` | `Connector` |
+| has no rank of its own | that of what it holds | `Serial`, `Parallel`, `Skip`, `Lift` | none: architecture forms |
+
+Padding sits before all of these: `FixedPadding` and `DynamicPadding` turn a list of `(C_i, D)`
+items into `(B, C, D)`. The full ladder, from one item to a batch, is in
+[Tensor contracts §2.5–2.6](docs/02-tensor-contracts.md#25-the-tensor-rank-ladder).
 
 ## Runtime type checking
 

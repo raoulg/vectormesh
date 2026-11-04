@@ -200,8 +200,8 @@ Worth knowing: `EarlyStopping` tracks *validation loss*, not the metric you repo
 closely enough that this rarely changes which trial wins, but if your task's loss and headline
 metric can diverge, keep that in mind when reading a search's stopping points.
 
-The mechanism axis reads directly from `vectormesh.components.gating` — `Skip → Gate → Highway →
-MoE` is exactly the ladder of increasingly expressive conditional computation from
+The mechanism axis reads from `vectormesh.components` — `Skip → Gate → Highway → MoE` is
+exactly the ladder of increasingly expressive conditional computation from
 [Core concepts §1.6](01-core-concepts.md#16-composition-over-configuration) and
 [Teaching path](08-teaching-path.md#notebook-3--3_moeipynb-conditional-computation). Searching
 "which mechanism" is a direct instance of that ladder, not a special case.

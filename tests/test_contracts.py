@@ -7,8 +7,9 @@ checks every branch rather than the one element beartype samples from a tuple.
 
 import pytest
 import torch
-from jaxtyping import TypeCheckError
-from torch import nn
+from beartype import beartype
+from jaxtyping import Float, TypeCheckError, jaxtyped
+from torch import Tensor, nn
 
 from vectormesh import (
     BaseVectorizer,
@@ -45,19 +46,18 @@ from vectormesh.components import (
     SparseMoE,
     Stack2D,
     TransformerBlock,
-    VectorComponent,
 )
 
 COMPONENT_FAMILIES = {
-    VectorComponent: [Gate, Highway],
     SequenceComponent: [Attention, TransformerBlock],
     RankPolymorphicComponent: [
         NeuralNet,
         Projection,
+        Gate,
+        Highway,
         MoE,
         SparseMoE,
         GaussianNoise,
-        Skip,
     ],
     BaseAggregator: [
         MeanAggregator,
@@ -130,9 +130,39 @@ def test_connector_after_parallel():
     assert pipeline((torch.rand(2, 4), torch.rand(2, 5))).shape == (2, 5)
 
 
-def test_vector_component_rejects_a_sequence():
+@pytest.mark.parametrize("form", [Serial, Parallel, Skip])
+def test_architecture_form_is_in_no_family(form):
+    for family in COMPONENT_FAMILIES:
+        assert not issubclass(form, family)
+
+
+@pytest.mark.parametrize(
+    "component",
+    [Gate(4), Highway(NeuralNet(4, 4), 4), Skip(NeuralNet(4, 4), 4)],
+    ids=["Gate", "Highway", "Skip"],
+)
+@pytest.mark.parametrize("shape", [(2, 4), (2, 3, 4)], ids=["2D", "3D"])
+def test_takes_any_rank_and_keeps_the_leading_axes(component, shape):
+    assert component(torch.rand(*shape)).shape == shape
+
+
+def test_rank_polymorphic_component_rejects_the_wrong_width():
     with pytest.raises(TypeCheckError):
-        Gate(4)(torch.rand(2, 3, 4))
+        Gate(4)(torch.rand(2, 3, 5))
+
+
+def test_lead_binds_input_to_output():
+    """A rank-polymorphic member that drops a leading axis breaks its own contract."""
+
+    class Drops(RankPolymorphicComponent):
+        @jaxtyped(typechecker=beartype)
+        def forward(
+            self, tensors: Float[Tensor, "*lead dim"]
+        ) -> Float[Tensor, "*lead dim"]:
+            return tensors[0]
+
+    with pytest.raises(TypeCheckError):
+        Drops()(torch.rand(2, 3, 4))
 
 
 def test_rank_polymorphic_component_takes_both_rungs():

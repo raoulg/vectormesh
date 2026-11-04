@@ -60,8 +60,8 @@ class NeuralNet(RankPolymorphicComponent):
 
     @jaxtyped(typechecker=beartype)
     def forward(
-        self, tensors: Float[Tensor, "... {self.hidden_size}"]
-    ) -> Float[Tensor, "... {self.out_size}"]:
+        self, tensors: Float[Tensor, "*lead {self.hidden_size}"]
+    ) -> Float[Tensor, "*lead {self.out_size}"]:
         layers = list(self.layers)
         x = tensors
         for layer in layers[:-1]:
@@ -80,8 +80,8 @@ class Projection(RankPolymorphicComponent):
 
     @jaxtyped(typechecker=beartype)
     def forward(
-        self, tensors: Float[Tensor, "... {self.hidden_size}"]
-    ) -> Float[Tensor, "... {self.out_size}"]:
+        self, tensors: Float[Tensor, "*lead {self.hidden_size}"]
+    ) -> Float[Tensor, "*lead {self.out_size}"]:
         return self.proj(tensors)
 
 

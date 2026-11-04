@@ -30,13 +30,13 @@ Not re-exported, import from the module: `detect_device`, `build_legal_reference
 ## 7.3 Components — `from vectormesh.components import ...`
 
 ```
-VectorComponent, SequenceComponent, RankPolymorphicComponent, BaseAggregator, Connector,
-Serial, Parallel, Lift, Siamese, JEPA,
+RankPolymorphicComponent, SequenceComponent, BaseAggregator, Connector,
+Serial, Parallel, Skip, Lift, Siamese, JEPA,
 FixedPadding, DynamicPadding,
 MeanAggregator, MaskedMeanAggregator, AttentionAggregator, RNNAggregator,
 NeuralNet, Projection, Attention, TransformerBlock,
 Concatenate2D, Concatenate3D, Stack2D,
-Skip, Gate, Highway, MoE, SparseMoE,
+Gate, Highway, MoE, SparseMoE,
 GaussianNoise, RepresentationStd
 ```
 
@@ -254,9 +254,9 @@ Output folder name: `{YYYYMMDDHHMMSS}_{dataset_tag}_{column_name}`.
 | `Concatenate2D` | `Connector` | `()` | `((B, D1), …)` → `(B, ΣD)` |
 | `Concatenate3D` | `Connector` | `()` | `((B, C, D1), …)` → `(B, C, ΣD)` |
 | `Stack2D` | `Connector` | `()` | `((B, D), …)` → `(B, n, D)` |
-| `Skip` | `RankPolymorphicComponent` | `(transform: nn.Module, in_size: int, projection: nn.Module \| None = None)` | `(…, in_size)` → `(…, out)` |
-| `Gate` | `VectorComponent` | `(hidden_size: int)` | `(B, D)` → `(B, D)` |
-| `Highway` | `VectorComponent` | `(transform: nn.Module, hidden_size: int)` | `(B, D)` → `(B, D)` |
+| `Skip` | — (architecture form) | `(transform: nn.Module, in_size: int, projection: nn.Module \| None = None)` | `(…, in_size)` → `(…, out)` |
+| `Gate` | `RankPolymorphicComponent` | `(hidden_size: int)` | `(…, hidden)` → `(…, hidden)` |
+| `Highway` | `RankPolymorphicComponent` | `(transform: nn.Module, hidden_size: int)` | `(…, hidden)` → `(…, hidden)` |
 | `MoE` | `RankPolymorphicComponent` | `(experts: list[nn.Module], hidden_size: int, out_size: int)` | `(…, hidden)` → `(…, out)` |
 | `SparseMoE` | `RankPolymorphicComponent` | `(experts: Sequence[nn.Module], hidden_size: int, out_size: int, k: int = 1)` | `(…, hidden)` → `(…, out)` |
 | `GaussianNoise` | `RankPolymorphicComponent` | `(sigma: float = 0.1, relative: bool = True)` | `(…, D)` → `(…, D)`, train-only |

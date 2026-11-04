@@ -30,8 +30,8 @@ def forward(self, tensors: Float[Tensor, "batch chunks dim"]) -> Float[Tensor, "
 | `Float[Tensor, "batch dim"]` | rank 2; any sizes, but must be consistent with other uses of `batch`/`dim` in the same call |
 | `Float[Tensor, "batch _ dim"]` | rank 3; `_` is an **anonymous** axis — any size, not tied to anything else (used for the chunk axis when the component doesn't care how many chunks there are) |
 | `Float[Tensor, "..."]` | any rank at all (used by `Serial` and `Parallel`, which only route) |
-| `Float[Tensor, "*lead dim"]` | rank ≥ 1; `*lead` names the leading axes, so the same name on the return type means *the same leading shape* (`GaussianNoise` is shape-preserving this way) |
-| `Float[Tensor, "... {self.hidden_size}"]` | any leading shape, but the **last** axis must equal this instance's `hidden_size` at runtime |
+| `Float[Tensor, "*lead dim"]` | rank ≥ 1; `*lead` names the leading axes, so the same name on the return type means *the same leading shape*. `...` does not bind: `"... dim" -> "... dim"` lets a component drop a leading axis unnoticed |
+| `Float[Tensor, "*lead {self.hidden_size}"]` | any leading shape, but the **last** axis must equal this instance's `hidden_size` at runtime |
 | `Int[Tensor, "batch tokens"]` | integer tensor (token ids, attention masks) |
 | `tuple[Float[Tensor, "batch dim"], ...]` | a variable-length tuple of rank-2 tensors — the output of a `Parallel` branch set; beartype checks one element of it per call (see [§2.6](#26-families-the-rung-is-the-class)) |
 
@@ -101,23 +101,24 @@ padder or a plain `torch.stack`.
 
 Every component with a shape contract belongs to a family that fixes the shape it takes and
 gives (`vectormesh/components/contracts.py`). A member narrows its family's shape, never widens
-it: `Gate` keeps `dim`, `NeuralNet` names its widths.
+it: `Gate` keeps its width, `NeuralNet` names its widths.
 
 | Family | Takes → gives | Members |
 |---|---|---|
-| `VectorComponent` | `(batch, dim)` → `(batch, out)` | `Gate`, `Highway` |
+| `RankPolymorphicComponent` | `(*lead, dim)` → `(*lead, out)` | `NeuralNet`, `Projection`, `Gate`, `Highway`, `MoE`, `SparseMoE`, `GaussianNoise` |
 | `SequenceComponent` | `(batch, seq, dim)` → `(batch, seq, out)` | `Attention`, `TransformerBlock` |
-| `RankPolymorphicComponent` | `(..., dim)` → `(..., out)` | `NeuralNet`, `Projection`, `MoE`, `SparseMoE`, `GaussianNoise`, `Skip` |
 | `BaseAggregator` | `(batch, _, dim)` → `(batch, dim)` | `MeanAggregator`, `MaskedMeanAggregator`, `AttentionAggregator`, `RNNAggregator` |
 | `Connector` | a tuple of branches → one tensor | `Concatenate2D`, `Concatenate3D`, `Stack2D` |
 
-`Serial`, `Parallel` and `Lift` belong to no family: their shape is that of the components
-they hold.
+`Serial`, `Parallel`, `Skip` and `Lift` are architecture forms and belong to no family: their
+shape is that of the components they hold. `Skip(Gate(d), d)` works at any rank,
+`Skip(TransformerBlock(d), d)` on sequences only.
 
 The rank-polymorphic family is what lets `NeuralNet` and `Projection` be a head on
-`(batch, dim)` **and** a per-chunk transform on `(batch, chunks, dim)`, and lets `MoE` blend
-experts per chunk on rank-3 input. The vector and sequence families are rank-locked: `Gate`
-and `Highway` take `(batch, dim)` only, attention needs a sequence axis.
+`(batch, dim)` **and** a per-chunk transform on `(batch, chunks, dim)`, lets `Gate` and
+`Highway` gate every chunk, and lets `MoE` blend experts per chunk on rank-3 input. `*lead`
+binds the leading axes of the input to those of the output, so a member that loses an axis
+fails its own check. The sequence family is rank-locked: attention needs a sequence axis.
 
 Vectorizers have families of the same kind, by the rank of one item
 (`vectormesh/data/vectorizers.py`):

@@ -3,18 +3,17 @@
 A family fixes the shape its members take and give, so the rung a component works on is
 its class, not only its annotation:
 
-- ``VectorComponent``, ``(batch, dim) -> (batch, out)``: ``Gate``, ``Highway``
+- ``RankPolymorphicComponent``, ``(*lead, dim) -> (*lead, out)``: ``NeuralNet``,
+  ``Projection``, ``Gate``, ``Highway``, ``MoE``, ``SparseMoE``, ``GaussianNoise``
 - ``SequenceComponent``, ``(batch, seq, dim) -> (batch, seq, out)``: ``Attention``,
   ``TransformerBlock``
-- ``RankPolymorphicComponent``, ``(..., dim) -> (..., out)``: ``NeuralNet``, ``Projection``,
-  ``MoE``, ``SparseMoE``, ``GaussianNoise``, ``Skip``
 - ``BaseAggregator``, ``(batch, _, dim) -> (batch, dim)``: the aggregators
 - ``Connector``, a tuple of branches -> one tensor: ``Concatenate2D``, ``Concatenate3D``,
   ``Stack2D``
 
-A member narrows its family's shape (``Gate`` keeps ``dim``; ``NeuralNet`` names its widths),
-it never widens it. A component in no family (``Serial``, ``Parallel``, ``Lift``) takes its
-shape from the components it holds.
+A member narrows its family's shape (``Gate`` keeps its width; ``NeuralNet`` names its
+widths), it never widens it. A component in no family is an architecture form (``Serial``,
+``Parallel``, ``Skip``, ``Lift``): it takes its shape from the components it holds.
 """
 
 from abc import abstractmethod
@@ -24,16 +23,6 @@ from jaxtyping import Float, jaxtyped
 from torch import Tensor
 
 from vectormesh.types import BaseComponent
-
-
-class VectorComponent(BaseComponent):
-    """Maps a batch of vectors to a batch of vectors: ``(batch, dim) -> (batch, out)``."""
-
-    @abstractmethod
-    @jaxtyped(typechecker=beartype)
-    def forward(
-        self, tensors: Float[Tensor, "batch dim"]
-    ) -> Float[Tensor, "batch out"]: ...
 
 
 class SequenceComponent(BaseComponent):
@@ -48,17 +37,18 @@ class SequenceComponent(BaseComponent):
 
 
 class RankPolymorphicComponent(BaseComponent):
-    """Works at any rank on the last axis: ``(..., dim) -> (..., out)``.
+    """Works at any rank on the last axis: ``(*lead, dim) -> (*lead, out)``.
 
     The leading axes pass through, so the same component is a head on ``(batch, dim)`` and a
-    per-chunk transform on ``(batch, chunks, dim)``.
+    per-chunk transform on ``(batch, chunks, dim)``. ``*lead`` is a named variadic axis: it
+    binds, so the output must have the leading axes the input had. ``...`` would not bind.
     """
 
     @abstractmethod
     @jaxtyped(typechecker=beartype)
     def forward(
-        self, tensors: Float[Tensor, "... dim"]
-    ) -> Float[Tensor, "... out"]: ...
+        self, tensors: Float[Tensor, "*lead dim"]
+    ) -> Float[Tensor, "*lead out"]: ...
 
 
 class BaseAggregator(BaseComponent):
@@ -83,7 +73,7 @@ class Connector(BaseComponent):
     in ``connect``'s annotation bind across all branches and the output.
     """
 
-    def forward(self, tensors: tuple[Tensor, ...]) -> Tensor:
+    def forward(self, tensors: tuple[Tensor, ...]) -> Float[Tensor, "..."]:
         return self.connect(*tensors)
 
     @abstractmethod

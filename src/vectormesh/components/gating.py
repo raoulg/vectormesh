@@ -1,4 +1,4 @@
-"""Residual and gating components for skip connections and gated transformations."""
+"""Gating components: a learned weight decides how much of a transform gets through."""
 
 from collections.abc import Sequence
 
@@ -8,72 +8,43 @@ from beartype import beartype
 from jaxtyping import Float, jaxtyped
 from torch import Tensor, nn
 
-from vectormesh.components.contracts import RankPolymorphicComponent, VectorComponent
+from vectormesh.components.contracts import RankPolymorphicComponent
 from vectormesh.types import VectorMeshError
 
 
-class Skip(RankPolymorphicComponent):
-    """Residual skip connection: output = batchnorm(transform(x) + projection(x))
-    - transform is the pipeline we want to apply to the input
-    - in_size is the dimensionality of the input; we need this for the layernorm
-    - projection is an optional pipeline, eg a Linear(in_size, out_size) if the
-    transform changes the dimensionality.
-    """
-
-    transform: nn.Module
-    projection: nn.Module | None
-    layernorm: nn.LayerNorm
-
-    def __init__(
-        self,
-        transform: nn.Module,
-        in_size: int,
-        projection: nn.Module | None = None,
-    ):
-        super().__init__()
-        self.in_size = in_size
-        self.transform = transform
-        self.projection = projection
-        self.layernorm = nn.LayerNorm(in_size)
-
-    @jaxtyped(typechecker=beartype)
-    def forward(
-        self, tensors: Float[Tensor, "... {self.in_size}"]
-    ) -> Float[Tensor, "... out"]:
-        # pre-norm (instead of post-norm) improves stability
-        tensors = self.layernorm(tensors)
-        residual = self.projection(tensors) if self.projection else tensors
-        transformed = self.transform(tensors)
-        return transformed + residual
-
-
-class Gate(VectorComponent):
-    """Simple gating: output = sigmoid(W·x) * x"""
+class Gate(RankPolymorphicComponent):
+    """Simple gating: output = sigmoid(W·x) * x, on the last axis at any rank."""
 
     def __init__(self, hidden_size: int):
         super().__init__()
+        self.hidden_size = hidden_size
         self.project = nn.Linear(hidden_size, hidden_size)
 
     @jaxtyped(typechecker=beartype)
     def forward(
-        self, tensors: Float[Tensor, "batch dim"]
-    ) -> Float[Tensor, "batch dim"]:
+        self, tensors: Float[Tensor, "*lead {self.hidden_size}"]
+    ) -> Float[Tensor, "*lead {self.hidden_size}"]:
         return F.sigmoid(self.project(tensors)) * tensors
 
 
-class Highway(VectorComponent):
-    """Highway network: G * T(x) + (1-G) * x"""
+class Highway(RankPolymorphicComponent):
+    """Highway network: G * T(x) + (1-G) * x, on the last axis at any rank.
+
+    The transform must keep the width, ``(*lead, hidden_size) -> (*lead, hidden_size)``,
+    since its output is blended with the input.
+    """
 
     def __init__(self, transform: nn.Module, hidden_size: int):
         super().__init__()
+        self.hidden_size = hidden_size
         self.transform = transform
         self.project = nn.Linear(hidden_size, hidden_size)
         self.norm = nn.LayerNorm(hidden_size)
 
     @jaxtyped(typechecker=beartype)
     def forward(
-        self, tensors: Float[Tensor, "batch dim"]
-    ) -> Float[Tensor, "batch dim"]:
+        self, tensors: Float[Tensor, "*lead {self.hidden_size}"]
+    ) -> Float[Tensor, "*lead {self.hidden_size}"]:
         # pre-norm (instead of post-norm) improves stability
         tensors = self.norm(tensors)
         gate = F.sigmoid(self.project(tensors))
@@ -117,8 +88,8 @@ class MoE(RankPolymorphicComponent):
 
     @jaxtyped(typechecker=beartype)
     def forward(
-        self, tensors: Float[Tensor, "... {self.hidden_size}"]
-    ) -> Float[Tensor, "... {self.out_size}"]:
+        self, tensors: Float[Tensor, "*lead {self.hidden_size}"]
+    ) -> Float[Tensor, "*lead {self.out_size}"]:
         # Per-position gates over experts; works for 2D and 3D alike.
         gates = F.softmax(self.router(tensors), dim=-1)  # (..., num_experts)
         # stack experts on dim -2: (..., num_experts, out_size)
@@ -188,8 +159,8 @@ class SparseMoE(RankPolymorphicComponent):
 
     @jaxtyped(typechecker=beartype)
     def forward(
-        self, tensors: Float[Tensor, "... {self.hidden_size}"]
-    ) -> Float[Tensor, "... {self.out_size}"]:
+        self, tensors: Float[Tensor, "*lead {self.hidden_size}"]
+    ) -> Float[Tensor, "*lead {self.out_size}"]:
         leading_shape = tensors.shape[:-1]
         flat = tensors.reshape(-1, self.hidden_size)  # (n, hidden) -- one routing axis
         n = flat.shape[0]

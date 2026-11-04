@@ -3,9 +3,11 @@
 Source: `src/vectormesh/components/`. Everything here is an `nn.Module`; most inherit
 `BaseComponent` (`types.py`), which adds nothing but an abstract `forward` returning a tensor.
 A component with a shape contract inherits it from its family in `contracts.py` —
-`VectorComponent`, `SequenceComponent`, `RankPolymorphicComponent`, `BaseAggregator` or
-`Connector` — so the class says which rung of the ladder it works on; see
-[§2.6](02-tensor-contracts.md#26-families-the-rung-is-the-class).
+`RankPolymorphicComponent`, `SequenceComponent`, `BaseAggregator` or `Connector` — so the
+class says which rung of the ladder it works on; see
+[§2.6](02-tensor-contracts.md#26-families-the-rung-is-the-class). The architecture forms in
+`pipelines.py` (`Serial`, `Parallel`, `Skip`, `Lift`) have no family: they take the shape of
+what they hold.
 
 Shorthand used below: `B` = batch, `C` = chunks, `D` = dim.
 
@@ -46,6 +48,16 @@ count them yourself.
 
 A `Parallel` returns a tuple, so the *next* element in the enclosing `Serial` must be a
 connector (`Concatenate2D`, `Concatenate3D`, `Stack2D`) that consumes tuples.
+
+### `Skip(transform, in_size, projection=None)`
+
+```
+y = transform(norm(x)) + (projection(norm(x)) if projection else norm(x))
+```
+
+Pre-norm residual connection around `transform`. `projection` is needed only when `transform`
+changes the width. Like `Serial`, `Skip` has no rank of its own: it takes `(*lead, in_size)`
+and works at whatever rank its transform does.
 
 ---
 
@@ -103,7 +115,7 @@ real chunks alone. The same caveat applies: put it directly after the padding.
 
 ### `NeuralNet(hidden_size, out_size)`
 
-Two-layer MLP: `Linear(h, h) → GELU → Linear(h, out)`. Annotated `"... {self.hidden_size}"`, so
+Two-layer MLP: `Linear(h, h) → GELU → Linear(h, out)`. Annotated `"*lead {self.hidden_size}"`, so
 it works both as a classification head on `(B, D)` and as a position-wise transform on
 `(B, C, D)` — which is exactly how it is used as an expert inside `MoE`.
 
@@ -164,16 +176,7 @@ by concatenation.
 ## 4.6 Gating — `gating.py`
 
 The theme of this module is **learned interpolation**: instead of committing to a transform,
-learn how much of it to apply.
-
-### `Skip(transform, in_size, projection=None)`
-
-```
-y = transform(norm(x)) + (projection(norm(x)) if projection else norm(x))
-```
-
-Pre-norm residual connection. `projection` is needed only when `transform` changes the
-dimension. Annotated `"... {self.in_size}"` — works at any rank.
+learn how much of it to apply. All of them work on the last axis at any rank.
 
 ### `Gate(hidden_size)`
 
@@ -181,7 +184,8 @@ dimension. Annotated `"... {self.in_size}"` — works at any rank.
 y = sigmoid(W x) * x
 ```
 
-Element-wise multiplicative gate: the network learns to suppress dimensions. Rank-2 only.
+Element-wise multiplicative gate: the network learns to suppress dimensions. Any rank: on
+`(B, C, D)` it gates every chunk.
 Composes nicely *inside* a `Skip`'s transform.
 
 ### `Highway(transform, hidden_size)`
@@ -192,7 +196,7 @@ y = g * T(x) + (1 - g) * x,   g = sigmoid(W · norm(x))
 
 A learned interpolation between "transform it" and "pass it through". Where `Skip` always adds
 the transform, `Highway` can learn to route around it entirely. See *Highway Networks* in
-`references/`. Rank-2 only.
+`references/`. Any rank; the transform must keep the width.
 
 ### `MoE(experts, hidden_size, out_size)`
 

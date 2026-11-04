@@ -13,13 +13,12 @@ from .contracts import (
     Connector,
     RankPolymorphicComponent,
     SequenceComponent,
-    VectorComponent,
 )
-from .gating import Gate, Highway, MoE, Skip, SparseMoE
+from .gating import Gate, Highway, MoE, SparseMoE
 from .metrics import RepresentationStd
 from .neural import Attention, NeuralNet, Projection, TransformerBlock
 from .padding import DynamicPadding, FixedPadding
-from .pipelines import JEPA, Lift, Parallel, Serial, Siamese
+from .pipelines import JEPA, Lift, Parallel, Serial, Siamese, Skip
 
 __all__ = [
     "JEPA",
@@ -51,5 +50,4 @@ __all__ = [
     "SparseMoE",
     "Stack2D",
     "TransformerBlock",
-    "VectorComponent",
 ]

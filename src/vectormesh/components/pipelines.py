@@ -4,7 +4,7 @@ from typing import Any
 
 import torch
 from beartype import beartype
-from jaxtyping import jaxtyped
+from jaxtyping import Float, jaxtyped
 from torch import Tensor, nn
 
 from vectormesh.types import BaseComponent, TensorInput
@@ -70,6 +70,45 @@ class Parallel(BaseComponent):
     @jaxtyped(typechecker=beartype)
     def forward(self, tensors: TensorInput) -> TensorInput:
         return tuple(branch(t) for branch, t in zip(self.branches, tensors))
+
+
+class Skip(BaseComponent):
+    """Residual connection around a transform: ``transform(norm(x)) + projection(norm(x))``.
+
+    An architecture form, like `Serial` and `Parallel`: it has no rank of its own, and
+    works at whatever rank its transform does. The input is layer-normed first (pre-norm),
+    and the residual is that normed input, through ``projection`` when given.
+
+    Args:
+        transform: the component the residual goes around.
+        in_size: width of the input's last axis, for the layer norm.
+        projection: maps the residual to the transform's output width, e.g.
+            ``Projection(in_size, out_size)`` when the transform changes the width.
+    """
+
+    transform: nn.Module
+    projection: nn.Module | None
+    layernorm: nn.LayerNorm
+
+    def __init__(
+        self,
+        transform: nn.Module,
+        in_size: int,
+        projection: nn.Module | None = None,
+    ):
+        super().__init__()
+        self.in_size = in_size
+        self.transform = transform
+        self.projection = projection
+        self.layernorm = nn.LayerNorm(in_size)
+
+    @jaxtyped(typechecker=beartype)
+    def forward(
+        self, tensors: Float[Tensor, "*lead {self.in_size}"]
+    ) -> Float[Tensor, "*lead out"]:
+        tensors = self.layernorm(tensors)
+        residual = self.projection(tensors) if self.projection else tensors
+        return self.transform(tensors) + residual
 
 
 def _ema_update(target: nn.Module, online: nn.Module, momentum: float) -> None:
