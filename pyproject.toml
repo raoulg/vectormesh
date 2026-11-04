@@ -21,10 +21,11 @@ dependencies = [
     "pydantic>=2.12.5",
     "pyvis>=0.3.2",
     "sentence-transformers>=2.0.0",
+    "tokenizers>=0.23.3",
     "torch>=2.9.1",
     "torchvision>=0.24.1",
     "tqdm>=4.65.0",
-    "transformers>=4.57.3",
+    "transformers>=5.16",
 ]
 
 [project.scripts]
@@ -38,7 +39,7 @@ build-backend = "hatchling.build"
 # Anchored with a leading slash: an unanchored "src" matches a directory of that name at
 # any depth, which pulls every .claude/worktrees/*/src into the sdist -- other branches'
 # source, shipped inside the release.
-include = ["/src", "/tests", "/README.md", "/pyproject.toml"]
+include = ["/src", "/tests", "/README.md", "/CHANGELOG.md", "/pyproject.toml"]
 
 [dependency-groups]
 dev = [
