@@ -78,7 +78,7 @@ become a fixed-size representation.
 | `MeanAggregator()` | none | plain `tensors.mean(dim=1)` — **counts zero-padding into the mean** |
 | `MaskedMeanAggregator()` | none | detects padded chunks (all-zero rows) and excludes them; `clamp(min=1)` guards against an all-padding row |
 | `AttentionAggregator(hidden_size)` | `Linear(D, 1)` | softmax weights over chunks, then weighted sum — learns *which* chunks matter |
-| `RNNAggregator(hidden_size)` | `GRU(D, D)` | runs a GRU over chunks, returns the last hidden state — the only aggregator that is order-sensitive |
+| `RNNAggregator(hidden_size)` | `GRU(D, D)` | runs a GRU over the real chunks (all-zero rows skipped), returns the hidden state after the last one — the only aggregator that is order-sensitive |
 
 **Choosing one:** if your padder is `FixedPadding`, `MaskedMeanAggregator` is almost always the
 right default — `MeanAggregator` will systematically shrink short documents toward zero.
@@ -91,8 +91,11 @@ right default — `MeanAggregator` will systematically shrink short documents to
 > [§5.5](05-architectures.md#55-chunk-level-fusion-with-an-moe-transformer).
 
 `AttentionAggregator` is the natural next step when you suspect only a few chunks carry the
-signal. `RNNAggregator` is the one to reach for when chunk *order* is meaningful; note it does
-not mask, so padding chunks are fed to the GRU.
+signal. `RNNAggregator` is the one to reach for when chunk *order* is meaningful. It detects
+padding the same way as `MaskedMeanAggregator`, moves each item's real chunks to the front in
+their own order, and packs the sequence, so the GRU never sees a padded chunk: padding at the end
+and gaps in the middle (after concatenating two padded sequences) give the same result as the
+real chunks alone. The same caveat applies: put it directly after the padding.
 
 ---
 
