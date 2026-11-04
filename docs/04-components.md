@@ -152,7 +152,7 @@ Three things worth knowing:
 
 ## 4.5 Connectors — `connectors.py`
 
-Consume the tuple that a `Parallel` returns; produce a single tensor. All three are
+Consume the tuple that a `Parallel` returns; produce a single tensor. All four are
 `Connector`s: `forward(tensors)` hands the tuple on as `connect(*tensors)`, so every branch is
 checked and the named axes bind across branches.
 
@@ -160,12 +160,19 @@ checked and the named axes bind across branches.
 |---|---|---|
 | `Concatenate2D()` | `((B, D1), (B, D2), …)` | `(B, D1+D2+…)` — widths may differ |
 | `Concatenate3D()` | `((B, C, D1), (B, C, D2), …)` | `(B, C, D1+D2+…)` |
+| `ConcatenateSequence()` | `((B, C1, D), (B, C2, D), …)` | `(B, C1+C2+…, D)` — chunk counts may differ |
 | `Stack2D()` | `((B, D), (B, D), …)` | `(B, n, D)` — a new axis |
 
 `Concatenate3D` requires the branches to share the chunk axis, which is why both padders in
 `CollateParallel` must use the same `max_chunks`. A useful property: a padded chunk stays
 all-zero after concatenation, so downstream padding detection (`MaskedMeanAggregator`,
 `TransformerBlock._pad_mask`) still fires correctly.
+
+`ConcatenateSequence` lengthens the sequence instead of the features: it puts the branches one
+after the other, so a `TransformerBlock` can attend across them (text chunks next to image
+patches). The widths must match, so a branch usually ends in a `Projection`. The padding of each
+branch lands in the middle of the joined sequence; `MaskedMeanAggregator`, `RNNAggregator` and
+`TransformerBlock._pad_mask` find all-zero rows at any position.
 
 `Stack2D` is the interesting one pedagogically: it converts *n parallel representations* into a
 *sequence of length n*, which you can then feed to attention. Fusion by attention rather than

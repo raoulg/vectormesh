@@ -28,6 +28,7 @@ from vectormesh.components import (
     BaseAggregator,
     Concatenate2D,
     Concatenate3D,
+    ConcatenateSequence,
     Connector,
     Gate,
     GaussianNoise,
@@ -65,7 +66,7 @@ COMPONENT_FAMILIES = {
         AttentionAggregator,
         RNNAggregator,
     ],
-    Connector: [Concatenate2D, Concatenate3D, Stack2D],
+    Connector: [Concatenate2D, Concatenate3D, ConcatenateSequence, Stack2D],
 }
 
 VECTORIZER_FAMILIES: dict[type[BaseVectorizer], list[type[BaseVectorizer]]] = {
@@ -123,6 +124,16 @@ def test_named_axis_binds_across_branches():
     says so before torch does."""
     with pytest.raises(TypeCheckError):
         Stack2D()((torch.rand(2, 3), torch.rand(2, 4)))
+
+
+def test_concatenate_sequence_joins_the_chunk_axis():
+    out = ConcatenateSequence()((torch.rand(2, 3, 4), torch.rand(2, 5, 4)))
+    assert out.shape == (2, 8, 4)
+
+
+def test_concatenate_sequence_needs_one_width():
+    with pytest.raises(TypeCheckError):
+        ConcatenateSequence()((torch.rand(2, 3, 4), torch.rand(2, 5, 6)))
 
 
 def test_connector_after_parallel():

@@ -108,7 +108,7 @@ it: `Gate` keeps its width, `NeuralNet` names its widths.
 | `RankPolymorphicComponent` | `(*lead, dim)` → `(*lead, out)` | `NeuralNet`, `Projection`, `Gate`, `Highway`, `MoE`, `SparseMoE`, `GaussianNoise` |
 | `SequenceComponent` | `(batch, seq, dim)` → `(batch, seq, out)` | `Attention`, `TransformerBlock` |
 | `BaseAggregator` | `(batch, _, dim)` → `(batch, dim)` | `MeanAggregator`, `MaskedMeanAggregator`, `AttentionAggregator`, `RNNAggregator` |
-| `Connector` | a tuple of branches → one tensor | `Concatenate2D`, `Concatenate3D`, `Stack2D` |
+| `Connector` | a tuple of branches → one tensor | `Concatenate2D`, `Concatenate3D`, `ConcatenateSequence`, `Stack2D` |
 
 `Serial`, `Parallel`, `Skip` and `Lift` are architecture forms and belong to no family: their
 shape is that of the components they hold. `Skip(Gate(d), d)` works at any rank,

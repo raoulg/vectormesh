@@ -91,7 +91,7 @@ image path are all covered in [The data layer](docs/03-data-layer.md).
 **Components** — architecture forms (`Serial`, `Parallel`, `Skip`), padding (`FixedPadding`,
 `DynamicPadding`), aggregation (`Mean`, `MaskedMean`, `Attention`, `RNN`), neural blocks
 (`NeuralNet`, `Projection`, `Attention`, `TransformerBlock`), connectors (`Concatenate2D`,
-`Concatenate3D`, `Stack2D`), gating (`Gate`, `Highway`, `MoE`, `SparseMoE`), augmentation
+`Concatenate3D`, `ConcatenateSequence`, `Stack2D`), gating (`Gate`, `Highway`, `MoE`, `SparseMoE`), augmentation
 (`GaussianNoise`), metrics (`Accuracy`, `F1Score`, `MAE`, `MASE`).
 
 Details and signatures: [Components](docs/04-components.md),
@@ -110,6 +110,7 @@ After collation a model works on two ranks: **2D `(B, D)`**, one vector per item
 | lowers it | `(B, C, D) → (B, D)` | `MeanAggregator`, `MaskedMeanAggregator`, `AttentionAggregator`, `RNNAggregator` | `BaseAggregator` |
 | joins a tuple, keeps the rank | `(B, D₁), (B, D₂) → (B, D₁+D₂)` | `Concatenate2D` | `Connector` |
 | | `(B, C, D₁), (B, C, D₂) → (B, C, D₁+D₂)` | `Concatenate3D` | `Connector` |
+| | `(B, C₁, D), (B, C₂, D) → (B, C₁+C₂, D)` | `ConcatenateSequence` | `Connector` |
 | joins a tuple, raises the rank | `(B, D), (B, D) → (B, N, D)` | `Stack2D` | `Connector` |
 | has no rank of its own | that of what it holds | `Serial`, `Parallel`, `Skip`, `Lift` | none: architecture forms |
 

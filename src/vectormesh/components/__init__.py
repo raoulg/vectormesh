@@ -7,7 +7,7 @@ from .aggregation import (
     RNNAggregator,
 )
 from .augmentation import GaussianNoise
-from .connectors import Concatenate2D, Concatenate3D, Stack2D
+from .connectors import Concatenate2D, Concatenate3D, ConcatenateSequence, Stack2D
 from .contracts import (
     BaseAggregator,
     Connector,
@@ -27,6 +27,7 @@ __all__ = [
     "BaseAggregator",
     "Concatenate2D",
     "Concatenate3D",
+    "ConcatenateSequence",
     "Connector",
     "DynamicPadding",
     "FixedPadding",

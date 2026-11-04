@@ -35,7 +35,7 @@ Serial, Parallel, Skip, Lift, Siamese, JEPA,
 FixedPadding, DynamicPadding,
 MeanAggregator, MaskedMeanAggregator, AttentionAggregator, RNNAggregator,
 NeuralNet, Projection, Attention, TransformerBlock,
-Concatenate2D, Concatenate3D, Stack2D,
+Concatenate2D, Concatenate3D, ConcatenateSequence, Stack2D,
 Gate, Highway, MoE, SparseMoE,
 GaussianNoise, RepresentationStd
 ```
@@ -253,6 +253,7 @@ Output folder name: `{YYYYMMDDHHMMSS}_{dataset_tag}_{column_name}`.
 | `TransformerBlock` | `SequenceComponent` | `(hidden_size, num_heads=8, dropout=0.1)` | `(B, seq, hidden)` → `(B, seq, hidden)`, shape-preserving |
 | `Concatenate2D` | `Connector` | `()` | `((B, D1), …)` → `(B, ΣD)` |
 | `Concatenate3D` | `Connector` | `()` | `((B, C, D1), …)` → `(B, C, ΣD)` |
+| `ConcatenateSequence` | `Connector` | `()` | `((B, C1, D), …)` → `(B, ΣC, D)` |
 | `Stack2D` | `Connector` | `()` | `((B, D), …)` → `(B, n, D)` |
 | `Skip` | — (architecture form) | `(transform: nn.Module, in_size: int, projection: nn.Module \| None = None)` | `(…, in_size)` → `(…, out)` |
 | `Gate` | `RankPolymorphicComponent` | `(hidden_size: int)` | `(…, hidden)` → `(…, hidden)` |

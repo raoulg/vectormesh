@@ -86,7 +86,7 @@ src/vectormesh/
     ├── padding.py         # FixedPadding, DynamicPadding
     ├── aggregation.py     # Mean / MaskedMean / Attention / RNN aggregators (3D -> 2D)
     ├── neural.py          # NeuralNet, Projection, Attention, TransformerBlock
-    ├── connectors.py      # Concatenate2D, Concatenate3D, Stack2D
+    ├── connectors.py      # Concatenate2D, Concatenate3D, ConcatenateSequence, Stack2D
     ├── gating.py          # Gate, Highway, MoE, SparseMoE
     ├── augmentation.py    # GaussianNoise (feature-space augmentation)
     └── metrics.py         # Accuracy, F1Score, MAE, MASE
