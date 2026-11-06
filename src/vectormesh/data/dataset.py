@@ -1,10 +1,11 @@
 import json
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Set, Tuple
 
 import torch
 from datasets import Dataset
+from jaxtyping import Float
 from loguru import logger
 from pydantic import BaseModel
 from tqdm import tqdm
@@ -56,7 +57,7 @@ class CollateParallel(BaseModel):
     vec2_col: str
     target_col: str
     padder: Callable
-    padder2: Optional[Callable] = None
+    padder2: Callable | None = None
 
     def __call__(self, batch):
         embeddings1 = [item[self.vec1_col] for item in batch]
@@ -76,14 +77,14 @@ class LabelEncoder:
     Reserves index 0 for 'Unknown' codes.
     """
 
-    def __init__(self, train_codes: List[int]):
-        self.unique_codes: List[int] = sorted(list(set(train_codes)))
+    def __init__(self, train_codes: list[int]):
+        self.unique_codes: list[int] = sorted(set(train_codes))
         self.unknown_idx: int = 0
 
-        self.code2idx: Dict[int, int] = {
+        self.code2idx: dict[int, int] = {
             code: i + 1 for i, code in enumerate(self.unique_codes)
         }
-        self.idx2code: Dict[int, int] = {
+        self.idx2code: dict[int, int] = {
             i + 1: code for i, code in enumerate(self.unique_codes)
         }
         self.idx2code[self.unknown_idx] = 0
@@ -91,7 +92,7 @@ class LabelEncoder:
     def __len__(self) -> int:
         return len(self.idx2code)
 
-    def onehot(self, codes: List[int]) -> torch.Tensor:
+    def onehot(self, codes: list[int]) -> Float[torch.Tensor, "classes"]:
         """Converts a list of raw codes into a Multi-Hot Tensor."""
         # Create a vector of zeros with length equal to total classes
         vector = torch.zeros(len(self), dtype=torch.float32)
@@ -115,7 +116,9 @@ class LabelEncoder:
                 indices.append(self.unknown_idx)
         return indices
 
-    def decode(self, vector: torch.Tensor, threshold: float) -> List[int]:
+    def decode(
+        self, vector: Float[torch.Tensor, "classes"], threshold: float
+    ) -> list[int]:
         """Converts a Multi-Hot Tensor/Probabilities back to raw codes."""
         indices = (vector > threshold).nonzero(as_tuple=True)[0]
         decoded = []
@@ -158,7 +161,7 @@ class LabelEncoder:
         return encoder
 
 
-def aktes_threshold(file_path: Path, threshold: int) -> Tuple[Dataset, Set[int]]:
+def aktes_threshold(file_path: Path, threshold: int) -> tuple[Dataset, set[int]]:
     # load texts from jsonl
     texts = []
     with open(file_path) as f:
@@ -190,7 +193,7 @@ def aktes_threshold(file_path: Path, threshold: int) -> Tuple[Dataset, Set[int]]
 
 def generate_splits(
     path: Path, threshold: int, trainsplit: float, testvalsplit: float
-) -> Tuple[Dict[str, Dataset], Set[int]]:
+) -> tuple[dict[str, Dataset], set[int]]:
     """
     Args:
         path (Path): location of the jsonl file

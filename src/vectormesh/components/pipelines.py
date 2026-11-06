@@ -4,7 +4,7 @@ from typing import Any
 
 import torch
 from beartype import beartype
-from jaxtyping import Float, jaxtyped
+from jaxtyping import Float, Int, jaxtyped
 from torch import Tensor, nn
 
 from vectormesh.types import BaseComponent, TensorInput
@@ -191,7 +191,9 @@ class Siamese(nn.Module):
             return
         _ema_update(self.target, self.online, self.momentum)
 
-    def _one_way(self, view_online: Tensor, view_target: Tensor):
+    def _one_way(
+        self, view_online: Float[Tensor, "..."], view_target: Float[Tensor, "..."]
+    ) -> tuple[Float[Tensor, "..."], Float[Tensor, "..."]]:
         z_online = self.online(view_online)
         target = self.target if self.target is not None else self.online
         if self.stopgrad:
@@ -202,7 +204,12 @@ class Siamese(nn.Module):
         prediction = self.predictor(z_online) if self.predictor else z_online
         return prediction, z_target
 
-    def forward(self, views: tuple[Tensor, Tensor]) -> tuple[Tensor, Tensor]:
+    def forward(
+        self, views: tuple[Float[Tensor, "..."], Float[Tensor, "..."]]
+    ) -> tuple[
+        tuple[Float[Tensor, "..."], Float[Tensor, "..."]],
+        tuple[Float[Tensor, "..."], Float[Tensor, "..."]],
+    ]:
         view_a, view_b = views
         if self.training:
             self.update_target()
@@ -274,7 +281,12 @@ class JEPA(nn.Module):
             return
         _ema_update(self.target, self.online, self.momentum)
 
-    def forward(self, inputs: tuple[Tensor, Tensor, Tensor]) -> tuple[Tensor, Tensor]:
+    def forward(
+        self,
+        inputs: tuple[
+            Float[Tensor, "batch ..."], Int[Tensor, "ctx"], Int[Tensor, "tgt"]
+        ],
+    ) -> tuple[Float[Tensor, "batch tgt dim"], Float[Tensor, "batch tgt dim"]]:
         x, ctx_idx, tgt_idx = inputs
         if self.training:
             self.update_target()

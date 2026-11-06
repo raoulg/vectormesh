@@ -73,7 +73,9 @@ class Connector(BaseComponent):
     in ``connect``'s annotation bind across all branches and the output.
     """
 
-    def forward(self, tensors: tuple[Tensor, ...]) -> Float[Tensor, "..."]:
+    def forward(
+        self, tensors: tuple[Float[Tensor, "..."], ...]
+    ) -> Float[Tensor, "..."]:
         return self.connect(*tensors)
 
     @abstractmethod

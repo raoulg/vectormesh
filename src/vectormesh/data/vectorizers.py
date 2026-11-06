@@ -406,7 +406,7 @@ class _ImageModelVectorizer(BaseVectorizer):
     def _vectors(self, outputs) -> Float[Tensor, "batch ..."]:
         """The model's output for a batch of images as this vectorizer's vectors."""
 
-    def _probe(self) -> Tensor:
+    def _probe(self) -> Float[Tensor, "1 ..."]:
         """The vectors of one dummy image.
 
         Probing with a forward pass is robust across architectures (ResNet's config
@@ -424,9 +424,9 @@ class _ImageModelVectorizer(BaseVectorizer):
     def _probe_dim(self) -> int:
         return int(self._probe().shape[-1])
 
-    def _vectorize(self, inputs: list, batchsize: int) -> list[Tensor]:
+    def _vectorize(self, inputs: list, batchsize: int) -> list[Float[Tensor, "..."]]:
         """Every image's vectors, batch by batch, on the CPU."""
-        vectors: list[Tensor] = []
+        vectors = []
         for i in range(0, len(inputs), batchsize):
             batch = [img.convert("RGB") for img in inputs[i : i + batchsize]]
             processed = self._processor(batch, return_tensors="pt").to(self.device)
@@ -710,7 +710,7 @@ class _RegexFeatures(BaseVectorizer):
 
         return self
 
-    def _vectorize_text(self, text: str) -> Tensor:
+    def _vectorize_text(self, text: str) -> Float[Tensor, "features"]:
         """Run the regexes on a single string and return its binary feature vector.
 
         Operates on whatever string it is given, so it works equally on a whole

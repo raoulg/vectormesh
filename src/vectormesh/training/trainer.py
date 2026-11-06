@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import uuid
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
@@ -8,6 +6,7 @@ from pathlib import Path
 from typing import Protocol, TypeVar, runtime_checkable
 
 import torch
+from jaxtyping import Float, Shaped
 from loguru import logger
 from torch.optim import Optimizer
 from tqdm import tqdm
@@ -18,7 +17,11 @@ OptimizerType = TypeVar("OptimizerType", bound=torch.optim.Optimizer)
 
 # A batch input is either a single tensor or a tuple of tensors (e.g. packed
 # sequences); the target is always a tensor.
-BatchTensor = torch.Tensor | tuple[torch.Tensor, ...]
+BatchTensor = (
+    Shaped[torch.Tensor, "batch ..."] | tuple[Shaped[torch.Tensor, "..."], ...]
+)
+#: the target of a batch, one row per example
+TargetTensor = Shaped[torch.Tensor, "batch ..."]
 
 
 @runtime_checkable
@@ -67,8 +70,8 @@ class Step(Protocol):
     """
 
     def __call__(
-        self, model: torch.nn.Module, x: BatchTensor, y: torch.Tensor
-    ) -> torch.Tensor: ...
+        self, model: torch.nn.Module, x: BatchTensor, y: TargetTensor
+    ) -> Float[torch.Tensor, ""]: ...
 
 
 def _timestamped_dir(log_dir: Path | None = None) -> Path:
@@ -84,7 +87,7 @@ def _timestamped_dir(log_dir: Path | None = None) -> Path:
     launches trials in parallel processes) from computing the *same* path.
     """
     log_dir = Path(log_dir) if log_dir is not None else Path(".")
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    timestamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
     return log_dir / f"{timestamp}-{uuid.uuid4().hex[:6]}"
 
 
@@ -184,8 +187,8 @@ class Trainer:
         return tqdm(iterable, **kwargs) if self.progress else iterable
 
     def _to_device(
-        self, x: BatchTensor, y: torch.Tensor
-    ) -> tuple[BatchTensor, torch.Tensor]:
+        self, x: BatchTensor, y: TargetTensor
+    ) -> tuple[BatchTensor, TargetTensor]:
         """Move a batch onto self.device, handling tuple inputs (e.g. packed
         sequences) as well as single tensors."""
         if not self.device:
@@ -198,7 +201,7 @@ class Trainer:
 
     def _next_batch(
         self, loader: Iterable, cache: str
-    ) -> tuple[BatchTensor, torch.Tensor]:
+    ) -> tuple[BatchTensor, TargetTensor]:
         """Pull one batch, keeping the iterator alive across steps.
 
         `next(iter(loader))` per step is only correct for an *iterator* -- a
@@ -298,8 +301,8 @@ class Trainer:
 
         # Average the results
         test_loss /= valid_steps
-        for key in metric_dict:
-            metric_dict[key] = metric_dict[key] / valid_steps
+        for key, value in metric_dict.items():
+            metric_dict[key] = value / valid_steps
 
         # Handle scheduler
         if self.scheduler:

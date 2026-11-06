@@ -1,16 +1,17 @@
-from __future__ import annotations
-
 from abc import ABC, abstractmethod
-from typing import Iterable, Iterator, Protocol, Union, runtime_checkable
+from collections.abc import Iterable, Iterator
+from typing import Protocol, runtime_checkable
 
 import numpy as np
 import torch
+from jaxtyping import Float, Int, Shaped
 from loguru import logger
+from torch import Tensor
 
-NumericType = Union[torch.Tensor, np.ndarray]
+NumericType = Shaped[Tensor, "..."] | np.ndarray
 
 #: one (x, y) batch, as a DataLoader or a legacy streamer yields it
-Batch = tuple[torch.Tensor, torch.Tensor]
+Batch = tuple[Float[Tensor, "batch ..."], Shaped[Tensor, "batch ..."]]
 
 
 @runtime_checkable
@@ -31,16 +32,17 @@ class Streamer(Protocol):
 
 
 #: what a fitted metric accepts as its training data
-Batches = Union[Iterable[Batch], Streamer]
+Batches = Iterable[Batch] | Streamer
 
 
 class Metric(ABC):
     """Base class for all metrics with proper device and type handling"""
 
     @abstractmethod
-    def _compute(self, y: torch.Tensor, yhat: torch.Tensor) -> torch.Tensor:
+    def _compute(
+        self, y: Shaped[Tensor, "batch ..."], yhat: Float[Tensor, "batch ..."]
+    ) -> Float[Tensor, ""]:
         """Actual metric computation - implemented by subclasses"""
-        pass
 
     def __call__(self, y: NumericType, yhat: NumericType) -> float:
         """Handle device/type conversion and return final metric"""
@@ -67,7 +69,9 @@ class Metric(ABC):
 
 
 class MAE(Metric):
-    def _compute(self, y: torch.Tensor, yhat: torch.Tensor) -> torch.Tensor:
+    def _compute(
+        self, y: Float[Tensor, "*shape"], yhat: Float[Tensor, "*shape"]
+    ) -> Float[Tensor, ""]:
         return torch.mean(torch.abs(y - yhat))
 
     def __repr__(self) -> str:
@@ -110,7 +114,7 @@ class MASE(Metric):
             return
         yield from train
 
-    def _calculate_scale(self, train: Batches) -> torch.Tensor:
+    def _calculate_scale(self, train: Batches) -> Float[Tensor, ""]:
         errors = [
             torch.mean(torch.abs(y - self._naive_predict(x)))
             for x, y in self._batches(train)
@@ -127,7 +131,9 @@ class MASE(Metric):
             )
         return scale
 
-    def _naive_predict(self, x: torch.Tensor) -> torch.Tensor:
+    def _naive_predict(
+        self, x: Float[Tensor, "batch time"] | Float[Tensor, "batch time 1"]
+    ) -> Float[Tensor, "batch {self.horizon}"]:
         """Repeat the last ``horizon`` observed steps — the seasonal-naive forecast.
 
         Accepts ``(batch, time)`` and ``(batch, time, 1)``; the trailing singleton
@@ -137,7 +143,9 @@ class MASE(Metric):
         naive = x[..., -self.horizon :, :] if x.ndim == 3 else x[..., -self.horizon :]
         return naive.squeeze(-1) if naive.ndim == 3 and naive.shape[-1] == 1 else naive
 
-    def _compute(self, y: torch.Tensor, yhat: torch.Tensor) -> torch.Tensor:
+    def _compute(
+        self, y: Float[Tensor, "batch horizon"], yhat: Float[Tensor, "batch horizon"]
+    ) -> Float[Tensor, ""]:
         mae = torch.mean(torch.abs(y - yhat))
         return mae / self.scale
 
@@ -153,7 +161,11 @@ class Accuracy(Metric):
     ``Collate``). In the latter case the target class is taken as ``argmax``.
     """
 
-    def _compute(self, y: torch.Tensor, yhat: torch.Tensor) -> torch.Tensor:
+    def _compute(
+        self,
+        y: Int[Tensor, "batch"] | Float[Tensor, "batch classes"],
+        yhat: Float[Tensor, "batch classes"],
+    ) -> Float[Tensor, ""]:
         predictions = yhat.argmax(dim=-1)
         if y.shape == yhat.shape:  # one-hot / soft targets -> class indices
             y = y.argmax(dim=-1)
@@ -169,7 +181,9 @@ class F1Score(Metric):
         self.threshold = threshold
         self.epsilon = epsilon
 
-    def _compute(self, y: torch.Tensor, yhat: torch.Tensor) -> torch.Tensor:
+    def _compute(
+        self, y: Float[Tensor, "batch classes"], yhat: Float[Tensor, "batch classes"]
+    ) -> Float[Tensor, ""]:
         y_prob = torch.sigmoid(yhat)
         y_pred = (y_prob > self.threshold).float()
 
@@ -238,7 +252,7 @@ class RepresentationStd:
     def __repr__(self) -> str:
         return "repstd"
 
-    def _select(self, yhat) -> torch.Tensor:
+    def _select(self, yhat) -> Float[Tensor, "batch ... dim"]:
         for i in self.index:
             yhat = yhat[i]
         if not isinstance(yhat, torch.Tensor):

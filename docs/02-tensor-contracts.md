@@ -33,6 +33,8 @@ def forward(self, tensors: Float[Tensor, "batch chunks dim"]) -> Float[Tensor, "
 | `Float[Tensor, "*lead dim"]` | rank ≥ 1; `*lead` names the leading axes, so the same name on the return type means *the same leading shape*. `...` does not bind: `"... dim" -> "... dim"` lets a component drop a leading axis unnoticed |
 | `Float[Tensor, "*lead {self.hidden_size}"]` | any leading shape, but the **last** axis must equal this instance's `hidden_size` at runtime |
 | `Int[Tensor, "batch tokens"]` | integer tensor (token ids, attention masks) |
+| `Float[Tensor, ""]` | rank 0: a scalar tensor, such as a loss or a metric before it becomes a `float` |
+| `Shaped[Tensor, "batch ..."]` | any dtype; for targets that are class indices in one task and float vectors in another |
 | `tuple[Float[Tensor, "batch dim"], ...]` | a variable-length tuple of rank-2 tensors — the output of a `Parallel` branch set; beartype checks one element of it per call (see [§2.6](#26-families-the-rung-is-the-class)) |
 
 The `{self.hidden_size}` form is worth pausing on. `NeuralNet(768, 32)` will reject a
