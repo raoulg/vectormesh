@@ -257,7 +257,7 @@ def test_lesson_table_components_exist_in_vectormesh():
 def test_metric_and_bound_are_quoted_later():
     bound = "macro F1, acceptance bound 0.80, cosine floor 0.62"
     checklist(stage="problem", answers=bound, lesson=1)
-    for stage in ("search_space", "results"):
+    for stage in ("search_space", "search_practices", "results"):
         assert bound in checklist(stage=stage)
 
 

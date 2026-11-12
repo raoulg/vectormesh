@@ -1012,12 +1012,11 @@ STAGE_ROWS: dict[DesignStage, list[Row]] = {
     DesignStage.search_practices: [
         Row(
             "floor",
-            f"What's the cheapest possible baseline, with NO training at all? ({_search_ch()} "
-            "§9.2)",
-            "A cosine-similarity/nearest-centroid classifier on the frozen embeddings gives you "
-            "the floor before a single epoch runs. If a trained model can't clear it, the "
-            "architecture usually isn't the problem.",
-            "the floor score and how it was computed",
+            "Has the no-training floor from stage 1 now been computed, on the same split and "
+            f"metric as the trained baseline? ({_search_ch()} §9.2)",
+            "A floor on another split or metric cannot be compared with the baseline; if a "
+            "trained model can't clear it, the architecture usually isn't the problem.",
+            "the computed floor score, and the split it was computed on",
         ),
         Row(
             "trained_baseline",
@@ -1118,6 +1117,13 @@ _WIRED_FROM: dict[DesignStage, tuple[DesignStage, str]] = {
             "**The metric and acceptance bound from stage 1:** {answer}\n\nA pretrained model is "
             "good enough the moment it clears that bound; the questions below ask whether a "
             "simpler one already does."
+        ),
+    ),
+    DesignStage.search_practices: (
+        DesignStage.problem,
+        (
+            "**What stage 1 said about the metric, the bound and the no-training floor:** "
+            "{answer}\n\nThe floor was named there; the questions below ask only what is new."
         ),
     ),
     DesignStage.search_space: (
