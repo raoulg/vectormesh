@@ -145,7 +145,7 @@ def test_tuner_tail_uses_the_expected_tune_names():
 
 @pytest.mark.integration
 def test_whole_block_runs_under_real_ray(tmp_path, monkeypatch):
-    pytest.importorskip("ray")
+    ray = pytest.importorskip("ray")
     pytest.importorskip("hyperopt")
     monkeypatch.setenv("RAY_ENABLE_UV_RUN_RUNTIME_ENV", "0")
     monkeypatch.chdir(tmp_path)
@@ -153,22 +153,30 @@ def test_whole_block_runs_under_real_ray(tmp_path, monkeypatch):
     _write_cache(tmp_path / "test", n=12, seed=1)
     code = _section_code("9.5")
     code = code.replace(
-        'Path("artefacts/my_dataset_train")', repr(str(tmp_path / "train"))
+        'Path("artefacts/my_dataset_train")', f"Path({str(tmp_path / 'train')!r})"
     )
     code = code.replace(
-        'Path("artefacts/my_dataset_test")', repr(str(tmp_path / "test"))
+        'Path("artefacts/my_dataset_test")', f"Path({str(tmp_path / 'test')!r})"
     )
     code = code.replace("num_samples=24", "num_samples=1")
+    code = code.replace(
+        'Path("ray_results").resolve()', repr(str(tmp_path / "ray_results"))
+    )
+    tune = ray.tune
+
     namespace: dict = {
         "__name__": "docs_example",
         "param_space": {
             "mechanism": "plain",
             "hidden": 16,
-            "lr": 1e-3,
+            "lr": tune.loguniform(1e-4, 1e-2),  # HyperOpt needs one sampled axis
             "n_experts": 2,
             "expert_hidden": 16,
             "epochs": 1,
         },
     }
-    exec(compile(code, str(DOC), "exec"), namespace)  # noqa: S102
-    assert namespace["results"].get_dataframe()["accuracy"].notna().all()
+    try:
+        exec(compile(code, str(DOC), "exec"), namespace)  # noqa: S102
+        assert namespace["results"].get_dataframe()["accuracy"].notna().all()
+    finally:
+        ray.shutdown()
