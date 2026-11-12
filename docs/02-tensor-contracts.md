@@ -32,6 +32,7 @@ def forward(self, tensors: Float[Tensor, "batch chunks dim"]) -> Float[Tensor, "
 | `Float[Tensor, "..."]` | any rank at all (used by `Serial` and `Parallel`, which only route) |
 | `Float[Tensor, "*lead dim"]` | rank ≥ 1; `*lead` names the leading axes, so the same name on the return type means *the same leading shape*. `...` does not bind: `"... dim" -> "... dim"` lets a component drop a leading axis unnoticed |
 | `Float[Tensor, "*lead {self.hidden_size}"]` | any leading shape, but the **last** axis must equal this instance's `hidden_size` at runtime |
+| `Float[Tensor, "batch seq//{self.kernel_size} dim"]` | an axis computed from a bound one: the output length must equal the input's `seq` divided by this instance's `kernel_size` (`Pool1D`; the convolutions bind their full length formula the same way) |
 | `Int[Tensor, "batch tokens"]` | integer tensor (token ids, attention masks) |
 | `Float[Tensor, ""]` | rank 0: a scalar tensor, such as a loss or a metric before it becomes a `float` |
 | `Shaped[Tensor, "batch ..."]` | any dtype; for targets that are class indices in one task and float vectors in another |
@@ -72,7 +73,9 @@ Decode it in three steps:
 Rank 3 where rank 2 was wanted almost always means **a missing aggregator**. Insert a
 `MaskedMeanAggregator()` (or `AttentionAggregator`, `RNNAggregator`) before the offending
 component. The reverse — rank 2 where rank 3 was wanted — usually means you aggregated too
-early, or fed an already-1D vector column (regex, image) into a chunk-aware branch.
+early, or fed an already-1D vector column (regex, image) into a chunk-aware branch. Rank 4 where
+rank 2 was wanted means an image that was not reduced to a vector: insert a `GlobalPool2D()`
+after the last `Conv2D` or `Pool2D`.
 
 A mismatch on the *last* axis size (`{self.hidden_size}`) means the dimension you configured
 does not match the embedding dimension in the cache. Read it from the metadata rather than
@@ -82,17 +85,25 @@ hardcoding:
 hidden_size = cache.metadata[column]["hidden_size"]
 ```
 
+An image is the exception to "the last axis": `Conv2D` checks its `in_size` against the
+**second** axis, the channels, because an image keeps PyTorch's `(batch, channels, height,
+width)` layout. A component that works on the last axis (`Gate`, `Norm`, `Skip`, `Projection`)
+reads the width of an image there. With a width different from its size it refuses the image;
+with a width that happens to be equal it runs, and acts on each row of pixels. Reduce the image
+with `GlobalPool2D` before such a component.
+
 ## 2.5 The tensor-rank ladder
 
-The four shapes from [§1.3](01-core-concepts.md#13-the-tensor-flow-ladder), with the code that
-produces and consumes each:
+The four shapes from [§1.3](01-core-concepts.md#13-the-tensor-flow-ladder), and the image a
+convolutional model works on, with the code that produces and consumes each:
 
 | Rank | Shape | Produced by | Consumed by |
 |:---:|---|---|---|
 | **1D** | `(D)` — one item | `RegexVectorizer`, `ImageVectorizer` | `torch.stack` in `Collate` → `(B, D)` |
 | **2D** | `(C, D)` — one item | `Vectorizer`, `ChunkedRegexVectorizer` | `FixedPadding` / `DynamicPadding` → `(B, C, D)` |
 | **2D** | `(B, D)` — a batch | aggregators, `Concatenate2D`, `NeuralNet` | `Gate`, `Highway`, heads |
-| **3D** | `(B, C, D)` — a batch | padders, `Concatenate3D`, `Stack2D` | aggregators, `TransformerBlock`, `MoE` |
+| **3D** | `(B, C, D)` — a batch | padders, `Concatenate3D`, `Stack2D`, `Conv1D`, `Recurrent` | aggregators, `TransformerBlock`, `MoE`, `Conv1D`, `Pool1D`, `Recurrent` |
+| **4D** | `(B, channels, H, W)` — a batch of images | a loader of raw pixels (outside the cache), `Conv2D`, `Pool2D` | `Conv2D`, `Pool2D`, `GlobalPool2D` → `(B, channels)` |
 
 Note the deliberate collision on rank 2: inside the cache it means *`(C, D)` for one document*;
 after collation it means *`(B, D)` for a whole batch*. The `tensordtype` field in the cache

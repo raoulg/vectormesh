@@ -5,14 +5,10 @@ import torch
 from jaxtyping import TypeCheckError
 from torch import nn
 
-from vectormesh.components import Recurrent, SequenceComponent
+from vectormesh.components import Recurrent
 from vectormesh.types import VectorMeshError
 
 KINDS = ["rnn", "gru", "lstm"]
-
-
-def test_is_a_sequence_component():
-    assert issubclass(Recurrent, SequenceComponent)
 
 
 @pytest.mark.parametrize(

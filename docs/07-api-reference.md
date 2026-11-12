@@ -30,18 +30,21 @@ Not re-exported, import from the module: `detect_device`, `build_legal_reference
 ## 7.3 Components — `from vectormesh.components import ...`
 
 ```
-RankPolymorphicComponent, SequenceComponent, BaseAggregator, Connector,
+RankPolymorphicComponent, SequenceComponent, SlidingComponent, ImageComponent,
+BaseAggregator, Connector,
 Serial, Parallel, Skip, Lift, Siamese, JEPA,
 FixedPadding, DynamicPadding,
-MeanAggregator, MaskedMeanAggregator, AttentionAggregator, RNNAggregator,
+MeanAggregator, MaskedMeanAggregator, AttentionAggregator, RNNAggregator, LastAggregator,
 NeuralNet, Projection, Attention, TransformerBlock,
+Conv1D, Pool1D, Conv2D, Pool2D, GlobalPool2D, Recurrent,
 Concatenate2D, Concatenate3D, ConcatenateSequence, Stack2D,
 Gate, Highway, MoE, SparseMoE,
 GaussianNoise, Norm, RepresentationStd
 ```
 
-The first line lists the families (`components/contracts.py`); every other component with a shape
-contract is a member of one — see [§7.7](#77-components).
+The first two lines list the families (`components/contracts.py`); every other component with a
+shape contract is a member of one, except `GlobalPool2D`, the step from an image to a vector —
+see [§7.7](#77-components).
 
 Metrics live in `vectormesh.components.metrics` and are **not** in `components.__all__`:
 `Metric, Accuracy, F1Score, MAE, MASE`.
@@ -247,10 +250,17 @@ Output folder name: `{YYYYMMDDHHMMSS}_{dataset_tag}_{column_name}`.
 | `MaskedMeanAggregator` | `BaseAggregator` | `()` | `(B, _, D)` → `(B, D)` |
 | `AttentionAggregator` | `BaseAggregator` | `(hidden_size: int)` | `(B, _, D)` → `(B, D)` |
 | `RNNAggregator` | `BaseAggregator` | `(hidden_size: int)` | `(B, _, D)` → `(B, D)` |
+| `LastAggregator` | `BaseAggregator` | `()` | `(B, _, D)` → `(B, D)`, the last step |
 | `NeuralNet` | `RankPolymorphicComponent` | `(hidden_size: int \| list[int], out_size: int)` | `(…, hidden)` → `(…, out)` |
 | `Projection` | `RankPolymorphicComponent` | `(hidden_size: int, out_size: int)` | `(…, hidden)` → `(…, out)` |
 | `Attention` | `SequenceComponent` | `(hidden_size, num_heads=8, dropout=0.1)` | `(B, seq, D)` → `(B, seq, D)` |
 | `TransformerBlock` | `SequenceComponent` | `(hidden_size, num_heads=8, dropout=0.1)` | `(B, seq, hidden)` → `(B, seq, hidden)`, shape-preserving |
+| `Recurrent` | `SequenceComponent` | `(in_size: int, hidden_size: int, kind: 'rnn' \| 'gru' \| 'lstm' = 'gru', n_layers: int = 1)` | `(B, seq, in_size)` → `(B, seq, hidden)`, the state at every step |
+| `Conv1D` | `SlidingComponent` | `(in_size: int, out_size: int, kernel_size: int, stride=1, padding=0, dilation=1)` | `(B, seq, in_size)` → `(B, output_length(seq), out_size)` |
+| `Pool1D` | `SlidingComponent` | `(kernel_size: int, kind: 'max' \| 'mean' = 'max')` | `(B, seq, D)` → `(B, seq // kernel_size, D)` |
+| `Conv2D` | `ImageComponent` | `(in_size: int, out_size: int, kernel_size: int, stride=1, padding=0, dilation=1)` | `(B, in_size, H, W)` → `(B, out_size, *output_size(H, W))` |
+| `Pool2D` | `ImageComponent` | `(kernel_size: int, kind: 'max' \| 'mean' = 'max')` | `(B, C, H, W)` → `(B, C, H // kernel_size, W // kernel_size)` |
+| `GlobalPool2D` | — (image to vector) | `(kind: 'max' \| 'mean' = 'mean')` | `(B, C, H, W)` → `(B, C)` |
 | `Concatenate2D` | `Connector` | `()` | `((B, D1), …)` → `(B, ΣD)` |
 | `Concatenate3D` | `Connector` | `()` | `((B, C, D1), …)` → `(B, C, ΣD)` |
 | `ConcatenateSequence` | `Connector` | `()` | `((B, C1, D), …)` → `(B, ΣC, D)` |

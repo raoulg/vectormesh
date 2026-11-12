@@ -30,27 +30,38 @@ from vectormesh.components import (
     Concatenate3D,
     ConcatenateSequence,
     Connector,
+    Conv1D,
+    Conv2D,
     Gate,
     GaussianNoise,
+    GlobalPool2D,
     Highway,
+    ImageComponent,
+    LastAggregator,
     MaskedMeanAggregator,
     MeanAggregator,
     MoE,
     NeuralNet,
     Parallel,
+    Pool1D,
+    Pool2D,
     Projection,
     RankPolymorphicComponent,
+    Recurrent,
     RNNAggregator,
     SequenceComponent,
     Serial,
     Skip,
+    SlidingComponent,
     SparseMoE,
     Stack2D,
     TransformerBlock,
 )
 
 COMPONENT_FAMILIES = {
-    SequenceComponent: [Attention, TransformerBlock],
+    SequenceComponent: [Attention, TransformerBlock, Recurrent],
+    SlidingComponent: [Conv1D, Pool1D],
+    ImageComponent: [Conv2D, Pool2D],
     RankPolymorphicComponent: [
         NeuralNet,
         Projection,
@@ -65,6 +76,7 @@ COMPONENT_FAMILIES = {
         MaskedMeanAggregator,
         AttentionAggregator,
         RNNAggregator,
+        LastAggregator,
     ],
     Connector: [Concatenate2D, Concatenate3D, ConcatenateSequence, Stack2D],
 }
@@ -145,6 +157,12 @@ def test_connector_after_parallel():
 def test_architecture_form_is_in_no_family(form):
     for family in COMPONENT_FAMILIES:
         assert not issubclass(form, family)
+
+
+def test_global_pool_is_in_no_family():
+    """It steps from an image to a vector: no family takes the one and gives the other."""
+    for family in COMPONENT_FAMILIES:
+        assert not issubclass(GlobalPool2D, family)
 
 
 @pytest.mark.parametrize(

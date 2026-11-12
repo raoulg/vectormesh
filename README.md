@@ -99,8 +99,9 @@ image path are all covered in [The data layer](docs/03-data-layer.md).
 `CollateParallel`, `LabelEncoder`.
 
 **Components** — architecture forms (`Serial`, `Parallel`, `Skip`, `Siamese`, `JEPA`), padding
-(`FixedPadding`, `DynamicPadding`), aggregation (`Mean`, `MaskedMean`, `Attention`, `RNN`),
-neural blocks (`NeuralNet`, `Projection`, `Attention`, `TransformerBlock`), connectors
+(`FixedPadding`, `DynamicPadding`), aggregation (`Mean`, `MaskedMean`, `Attention`, `RNN`,
+`Last`), neural blocks (`NeuralNet`, `Projection`, `Attention`, `TransformerBlock`), convolution
+(`Conv1D`, `Pool1D`, `Conv2D`, `Pool2D`, `GlobalPool2D`), recurrence (`Recurrent`), connectors
 (`Concatenate2D`, `Concatenate3D`, `ConcatenateSequence`, `Stack2D`), gating (`Gate`, `Highway`,
 `MoE`, `SparseMoE`), augmentation (`GaussianNoise`), metrics in `vectormesh.components.metrics`
 (`Accuracy`, `F1Score`, `MAE`, `MASE`, `RepresentationStd`).
@@ -119,14 +120,18 @@ Details and signatures: [Components](docs/04-components.md),
 ## Components by rank
 
 After collation a model works on two ranks: **2D `(B, D)`**, one vector per item, and **3D
-`(B, C, D)`**, a sequence per item. Every component does one thing to the rank, and its family
-(`components/contracts.py`) says which:
+`(B, C, D)`**, a sequence per item. A model on images has a third: **4D `(B, channels, H, W)`**,
+PyTorch's image layout, channels second. Every component does one thing to the rank, and its
+family (`components/contracts.py`) says which:
 
 | What it does to the rank | In → out | Components | Family |
 |---|---|---|---|
 | keeps it, any rank (works on the last axis) | `(*lead, D) → (*lead, D')` | `NeuralNet`, `Projection`, `Gate`, `Highway`, `MoE`, `SparseMoE`, `GaussianNoise` | `RankPolymorphicComponent` |
-| keeps it, 3D only | `(B, C, D) → (B, C, D')` | `Attention`, `TransformerBlock` | `SequenceComponent` |
-| lowers it | `(B, C, D) → (B, D)` | `MeanAggregator`, `MaskedMeanAggregator`, `AttentionAggregator`, `RNNAggregator` | `BaseAggregator` |
+| keeps it, 3D only | `(B, C, D) → (B, C, D')` | `Attention`, `TransformerBlock`, `Recurrent` | `SequenceComponent` |
+| keeps it, 3D only; a window may shorten the sequence | `(B, C, D) → (B, C', D')` | `Conv1D`, `Pool1D` | `SlidingComponent` |
+| keeps it, 4D only | `(B, channels, H, W) → (B, channels', H', W')` | `Conv2D`, `Pool2D` | `ImageComponent` |
+| lowers it | `(B, C, D) → (B, D)` | `MeanAggregator`, `MaskedMeanAggregator`, `AttentionAggregator`, `RNNAggregator`, `LastAggregator` | `BaseAggregator` |
+| lowers it, image to vector | `(B, channels, H, W) → (B, channels)` | `GlobalPool2D` | none |
 | joins a tuple, keeps the rank | `(B, D₁), (B, D₂) → (B, D₁+D₂)` | `Concatenate2D` | `Connector` |
 | | `(B, C, D₁), (B, C, D₂) → (B, C, D₁+D₂)` | `Concatenate3D` | `Connector` |
 | | `(B, C₁, D), (B, C₂, D) → (B, C₁+C₂, D)` | `ConcatenateSequence` | `Connector` |
@@ -193,8 +198,8 @@ uv run ty check
 src/vectormesh/
 ├── types.py               # VectorMeshError, Cachable, BaseComponent, TensorInput
 ├── data/                  # vectorizers, cache, hub, schema, collation
-├── components/            # pipelines, padding, aggregation, neural,
-│                          # connectors, gating, augmentation, metrics
+├── components/            # pipelines, padding, aggregation, neural, convolution,
+│                          # recurrent, connectors, gating, augmentation, metrics
 └── training/              # Trainer, TrainerSettings, EarlyStopping, Reporter
 docs/                      # documentation (start at docs/README.md)
 notebooks/                 # tutorials, in order

@@ -23,7 +23,7 @@ afternoon.
 | 1 | [Core concepts](01-core-concepts.md) | The embed-once economics, thinking at the vector level, the 1D/2D/3D tensor-flow ladder |
 | 2 | [Tensor contracts](02-tensor-contracts.md) | Shapes as a type system: jaxtyping + beartype, reading shape errors |
 | 3 | [The data layer](03-data-layer.md) | Vectorizers, `VectorCache`, metadata, publishing a cache to the HuggingFace hub, `DatasetSchema`, `OneHot`/`Collate` |
-| 4 | [Components](04-components.md) | Every building block: padding, aggregation, neural, connectors, gating, augmentation |
+| 4 | [Components](04-components.md) | Every building block: padding, aggregation, neural, connectors, convolution, recurrence, gating, augmentation |
 | 5 | [Architectures](05-architectures.md) | Composing the blocks: serial, parallel fusion, skip/highway, MoE, chunk-aligned fusion |
 | 6 | [Training](06-training.md) | Metrics, loss choice, `vectormesh.training.Trainer` wiring, the batch scripts |
 | 7 | [API reference](07-api-reference.md) | Compact signature tables for everything exported |
@@ -84,8 +84,10 @@ src/vectormesh/
 └── components/
     ├── pipelines.py       # Serial, Parallel, Skip, Lift (architecture forms)
     ├── padding.py         # FixedPadding, DynamicPadding
-    ├── aggregation.py     # Mean / MaskedMean / Attention / RNN aggregators (3D -> 2D)
+    ├── aggregation.py     # Mean / MaskedMean / Attention / RNN / Last aggregators (3D -> 2D)
     ├── neural.py          # NeuralNet, Projection, Attention, TransformerBlock
+    ├── convolution.py     # Conv1D, Pool1D, Conv2D, Pool2D, GlobalPool2D
+    ├── recurrent.py       # Recurrent (rnn, gru or lstm)
     ├── connectors.py      # Concatenate2D, Concatenate3D, ConcatenateSequence, Stack2D
     ├── gating.py          # Gate, Highway, MoE, SparseMoE
     ├── augmentation.py    # GaussianNoise (feature-space augmentation)

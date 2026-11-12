@@ -13,30 +13,13 @@ from vectormesh.components import (
     Conv1D,
     Conv2D,
     GlobalPool2D,
-    ImageComponent,
     Pool1D,
     Pool2D,
     Serial,
-    SlidingComponent,
 )
 from vectormesh.types import VectorMeshError
 
 GRID = list(itertools.product([1, 2, 3, 5], [1, 2, 3], [0, 1, 2], [1, 2]))
-
-
-@pytest.mark.parametrize(
-    ("member", "family"),
-    [
-        (Conv1D, SlidingComponent),
-        (Pool1D, SlidingComponent),
-        (Conv2D, ImageComponent),
-        (Pool2D, ImageComponent),
-    ],
-)
-def test_member_is_in_its_family_only(member, family):
-    assert issubclass(member, family)
-    other = ImageComponent if family is SlidingComponent else SlidingComponent
-    assert not issubclass(member, other)
 
 
 @pytest.mark.parametrize(("kernel", "stride", "padding", "dilation"), GRID)
