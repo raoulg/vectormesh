@@ -213,6 +213,9 @@ out = (length + 2 * padding - dilation * (kernel_size - 1) - 1) // stride + 1
 ```
 
 With `stride=1` and an odd kernel, `padding=(kernel_size - 1) // 2 * dilation` keeps the length.
+Each `forward` annotates its output with this formula, so the contract checks the length
+`output_length` announces. A window that does not fit its input raises a `VectorMeshError` that
+names the component, the length it got and its settings, before PyTorch is called.
 
 ### `Conv1D(in_size, out_size, kernel_size, stride=1, padding=0, dilation=1)`
 
