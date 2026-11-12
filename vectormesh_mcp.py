@@ -111,10 +111,26 @@ _ROW = re.compile(
 )
 
 
+class DocsUnavailableError(RuntimeError):
+    """The course docs could not be read, locally or from the pinned ref."""
+
+
 def _load_chapters() -> list[Chapter]:
-    """Parse docs/README.md's reading-order table into an ordered list of Chapters."""
+    """Parse docs/README.md's reading-order table into an ordered list of Chapters.
+
+    Raises DocsUnavailableError, naming the ref and the URL, when the index cannot be fetched
+    or holds no chapters.
+    """
+    where = DOCS_README if LOCAL else f"{RAW_BASE}/docs/README.md"
+    try:
+        text = _load_text("docs/README.md")
+    except (OSError, urllib.error.URLError) as exc:
+        raise DocsUnavailableError(
+            f"cannot read the course docs for VECTORMESH_REF={VECTORMESH_REF} from {where} "
+            f"({exc})"
+        ) from exc
     chapters: list[Chapter] = []
-    for line in _load_text("docs/README.md").splitlines():
+    for line in text.splitlines():
         row = _ROW.match(line)
         if not row:
             continue
@@ -126,11 +142,24 @@ def _load_chapters() -> list[Chapter]:
                 summary=row.group("summary"),
             )
         )
+    if not chapters:
+        raise DocsUnavailableError(
+            f"no chapters in the reading-order table for VECTORMESH_REF={VECTORMESH_REF} at "
+            f"{where}"
+        )
     return chapters
 
 
+def _startup_chapters() -> list[Chapter]:
+    """The chapters, or an exit with one line on stderr when the docs cannot be read."""
+    try:
+        return _load_chapters()
+    except DocsUnavailableError as exc:
+        raise SystemExit(f"vectormesh_mcp: {exc}") from None
+
+
 # Loaded once at startup; the corpus is tiny and static per process.
-CHAPTERS: list[Chapter] = _load_chapters()
+CHAPTERS: list[Chapter] = _startup_chapters()
 # Map a few forms of a name/filename/number to its Chapter for forgiving lookups.
 _BY_KEY: dict[str, Chapter] = {}
 for _c in CHAPTERS:

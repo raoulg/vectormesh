@@ -8,6 +8,8 @@ import asyncio
 import importlib.util
 import re
 import sys
+import urllib.error
+from email.message import Message
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -452,3 +454,34 @@ def test_budget_too_small_says_what_the_baseline_and_rerun_take():
     )
     # 5 seeds twice, one at a time, at 2 minutes a run: 20 minutes.
     assert "those two alone take 20.0 minutes" in text
+
+
+def _remote(monkeypatch, fetch: Any) -> None:
+    monkeypatch.setattr(mcp_script, "LOCAL", False)
+    monkeypatch.setattr(mcp_script, "_remote_cache", {})
+    monkeypatch.setattr(mcp_script.urllib.request, "urlopen", fetch)
+
+
+def test_load_chapters_names_the_ref_and_url_on_a_404(monkeypatch):
+    def not_found(url: str, timeout: float) -> Any:
+        raise urllib.error.HTTPError(url, 404, "Not Found", Message(), None)
+
+    _remote(monkeypatch, not_found)
+    with pytest.raises(mcp_script.DocsUnavailableError) as raised:
+        mcp_script._load_chapters()
+    message = str(raised.value)
+    assert f"VECTORMESH_REF={mcp_script.VECTORMESH_REF}" in message
+    assert f"{mcp_script.RAW_BASE}/docs/README.md" in message
+    assert "404" in message
+
+
+def test_startup_exits_with_one_line_without_network(monkeypatch):
+    def offline(url: str, timeout: float) -> Any:
+        raise urllib.error.URLError("nodename nor servname provided")
+
+    _remote(monkeypatch, offline)
+    with pytest.raises(SystemExit) as raised:
+        mcp_script._startup_chapters()
+    message = str(raised.value.code)
+    assert message.startswith("vectormesh_mcp: cannot read the course docs")
+    assert "\n" not in message
