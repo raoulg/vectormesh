@@ -16,6 +16,7 @@ from .contracts import (
     SequenceComponent,
     SlidingComponent,
 )
+from .convolution import Conv1D, Conv2D, GlobalPool2D, Pool1D, Pool2D
 from .gating import Gate, Highway, MoE, SparseMoE
 from .metrics import RepresentationStd
 from .neural import Attention, NeuralNet, Projection, TransformerBlock
@@ -32,10 +33,13 @@ __all__ = [
     "Concatenate3D",
     "ConcatenateSequence",
     "Connector",
+    "Conv1D",
+    "Conv2D",
     "DynamicPadding",
     "FixedPadding",
     "Gate",
     "GaussianNoise",
+    "GlobalPool2D",
     "Highway",
     "ImageComponent",
     "Lift",
@@ -45,6 +49,8 @@ __all__ = [
     "NeuralNet",
     "Norm",
     "Parallel",
+    "Pool1D",
+    "Pool2D",
     "Projection",
     "RNNAggregator",
     "RankPolymorphicComponent",

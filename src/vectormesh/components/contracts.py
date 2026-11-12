@@ -17,7 +17,9 @@ its class, not only its annotation:
 
 A member narrows its family's shape (``Gate`` keeps its width; ``NeuralNet`` names its
 widths), it never widens it. A component in no family is an architecture form (``Serial``,
-``Parallel``, ``Skip``, ``Lift``): it takes its shape from the components it holds.
+``Parallel``, ``Skip``, ``Lift``): it takes its shape from the components it holds. The
+one other component in no family is ``GlobalPool2D``, the step from an image to a
+vector, ``(batch, channels, height, width) -> (batch, channels)``.
 """
 
 from abc import abstractmethod
