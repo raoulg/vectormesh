@@ -584,7 +584,7 @@ STAGE_INTRO: dict[DesignStage, str] = {
     DesignStage.results: (
         "A search is finished when someone else can read it: the runs answer the hypothesis, "
         f"and they are shared so that others can see who made them and what was explored "
-        f"({_search_ch()} §9.8, {_reporters()})."
+        f"({_search_ch()} §9.6-9.7, {_reporters()})."
     ),
 }
 
@@ -1048,26 +1048,29 @@ STAGE_ROWS: dict[DesignStage, list[Row]] = {
         ),
         Row(
             "logging",
-            f"Where and how often will you log? ({_search_ch()} §9.8)",
-            "Once, after the whole search finishes — never per-trial into a shared sqlite "
-            "backend, which concurrent trial processes will corrupt.",
-            "the logging plan",
+            f"Where and when will you log? ({_search_ch()} §9.8)",
+            "Each trial runs in its own process; logging from inside the trainable makes "
+            "concurrent writers corrupt or block a shared sqlite store.",
+            "logging from the driver after `tuner.fit()` returns: one mlflow run per trial "
+            "(role `trial`), plus the `baseline` and `final` runs",
         ),
     ],
     DesignStage.results: [
         Row(
             "views",
-            f"Which mlflow views will you read? ({_reporters()} §10.1)",
-            "A table of runs, a chart of the metric against model size, and per-epoch curves "
-            "answer different questions.",
-            "the views",
+            "Which mlflow views will you read?",
+            "Each view answers a different question; reading only the best row lets a lucky "
+            "trial pass for a result.",
+            "a run table filtered on the final runs, parameters against the score over all "
+            "trials, and per-epoch curves of chosen trials",
         ),
         Row(
             "comparison",
             "Which comparison answers the hypothesis?",
-            "The winner's rerun against the baseline, in units of the baseline's sigma, is the "
-            "comparison a claim rests on.",
-            "the two runs (or groups) compared, and on which metric",
+            "A claim rests on a comparison chosen before reading the runs; one chosen afterwards "
+            "lets noise pick the winner.",
+            "the two runs or groups compared, on the stage-1 metric, and the spread the "
+            "difference is measured against",
         ),
         Row(
             "bound_met",
@@ -1652,8 +1655,10 @@ async def vectormesh_search_method(params: SearchMethodInput) -> str:
         ),
         "",
         (
-            "7. **Log once, after `tuner.fit()` returns** — never per-trial if the logging backend "
-            f"uses local sqlite (e.g. mlflow's default); concurrent trial processes will corrupt it. "
+            "7. **Log from the driver, after `tuner.fit()` returns** — never from inside the "
+            "trainable: each trial is its own process, and concurrent writers corrupt a local "
+            "sqlite store (mlflow's default). One mlflow run per trial (role `trial`), plus the "
+            "`baseline` and `final` runs. "
             f"({url}#98-logging-discipline-one-summary-per-search)"
         ),
         "",

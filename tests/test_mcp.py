@@ -331,3 +331,21 @@ def test_budget_tool_states_the_trade_as_a_question():
     assert "give 34 trials" in text
     assert "give 4 trials" in text
     assert text.rstrip().endswith("?")
+
+
+def test_stage_7_and_8_agree_on_logging():
+    logging = _row("search_practices", "logging", 4)
+    assert "after `tuner.fit()` returns" in logging.names
+    assert "one mlflow run per trial" in logging.names
+    views = _row("results", "views", 4)
+    assert "§10.1" not in views.question
+    assert "final runs" in views.names
+    assert (
+        "one mlflow run per trial"
+        in call("vectormesh_search_method", params={}).lower()
+    )
+
+
+def test_width_row_speaks_of_the_hidden_width():
+    for lesson in (1, 3):
+        assert "`hidden_size`" in _row("architecture", "width", lesson).question
