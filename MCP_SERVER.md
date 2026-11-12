@@ -11,9 +11,9 @@ the main idea here is to learn how to work *with* an assistant while building a 
 
 ## How to use it
 
-- **Designing something new:** in Claude Code, run `/vectormesh:design` (optionally describe your
-  idea). In any client, just say **"Help me design a new vectormesh component using the
-  vectormesh server."** Expect a conversation, not an answer: your assistant asks which lesson you are in, then guides you through the stages of design, asking you questions one stage at a time and waiting for your actual answers before moving on.
+- **Designing for a problem:** in Claude Code, run `/vectormesh:design` (optionally describe your
+  problem). In any client, just say **"Coach me from my problem to a deep learning model using
+  the vectormesh server: I want to predict … from …."** Expect a conversation, not an answer: your assistant asks which lesson you are in, then guides you through the stages of design, asking you questions one stage at a time and waiting for your actual answers before moving on.
 - **Searching an architecture:** `/vectormesh:search`, or **"Help me set up a Ray Tune search over
   my architecture using the vectormesh server."**
 - **Looking something up:** "Using the vectormesh server, get the chapter on components." /
@@ -48,13 +48,15 @@ actually said:
 7. **search_practices** — how will a search result be trusted, not just read (no-training floor, baseline with seed spread, stopping rule, the winner rerun over seeds, effect size, logging discipline)?
 8. **results** — which mlflow views answer the hypothesis, does the result clear the bound, and how are the runs shared, named and tagged so others can see who made them and what was explored?
 
-The tool takes an optional `lesson` (1 to 7). Until the student has said it, every response asks the assistant to ask; once given, it is kept with the progress. Later stages quote the student's own metric and acceptance bound from stage 1 back to them.
+The tool takes an optional `lesson` (1 to 7); if you use the server outside the course, pass lesson 7. Every stage offers only the material of that lesson or earlier. Until the lesson is known, every response asks the assistant to ask for it, the tables are written for lesson 1, and stage 5 returns only that request. Once given, the lesson is kept with the progress; a different lesson on a later call replaces it, and the response says so. `reset=true` clears the progress to start a new conversation. Later stages quote the student's own metric, acceptance bound and no-training floor from stage 1 back to them.
 
-Each stage returns a markdown table — question / why it matters / what a good answer names — plus an instruction to the assistant: ask the student, wait for a real answer, don't answer on their behalf, write no code yet, and don't fetch the next stage until this one is actually recorded. Progress is held in memory for the current session only.
+After stage 1 the assistant gives the design a home, `design-log.md` next to your work, and from stage 2 on every stage reminds it to append your answers there. Progress lives in the server's memory, one per client session, so a restarted server starts empty; the log is how to pick up.
+
+Each stage returns a markdown table — question / why it matters / what a good answer names — plus an instruction to the assistant: ask the student, wait for a real answer, don't answer on their behalf, write no code yet, and don't fetch the next stage until this one is actually recorded. The closing summary comes only once every stage has an answer.
 
 **`vectormesh_search_budget`** takes `seconds_per_trial`, `budget_minutes`, and optionally
 `parallel_trials` (default 1) and `seeds_for_rerun` (default 3). It reserves the baseline over
-seeds and the winner's rerun over seeds, says how many trials are left for the search, and puts
+seeds and the winner's rerun over as many seeds (`seeds_for_rerun` counts each), says how many trials are left for the search, and puts
 the trade — a wide scan of short trials against fewer long ones — to the student as a question.
 
 **Prompts**
@@ -92,14 +94,15 @@ cohort runs exactly the same thing and the two can't drift apart.
 
 Use **`stable`**. It is a tag that moves to the newest release, so a config that names it never
 goes out of date, and nothing on `main` reaches you before it has been released. The
-[releases](https://github.com/raoulg/vectormesh/tags) also carry versioned tags such as
-`v0.9.2` for anyone who needs to freeze one. You can also point `VECTORMESH_REF` to a branch or
+[releases](https://github.com/raoulg/vectormesh/tags) also carry a versioned tag `vX.Y.Z` per
+release for anyone who needs to freeze one: pick the release whose notes mention the coach you
+want. You can also point `VECTORMESH_REF` to a branch or
 work from a local clone (see below).
 
 ### Claude Code
 
 ```bash
-claude mcp add vectormesh -e VECTORMESH_REF=stable -- \
+claude mcp add vectormesh -s user -e VECTORMESH_REF=stable -- \
   sh -c 'uv run --no-project https://raw.githubusercontent.com/raoulg/vectormesh/$VECTORMESH_REF/vectormesh_mcp.py'
 ```
 
@@ -156,7 +159,7 @@ local file instead of the URL — the server then reads `docs/` straight off dis
 up without a restart:
 
 ```bash
-claude mcp add vectormesh -- uv run --no-project /path/to/vectormesh/vectormesh_mcp.py
+claude mcp add vectormesh -s user -- uv run --no-project /path/to/vectormesh/vectormesh_mcp.py
 ```
 
 ## Tracking the bleeding edge instead
@@ -170,14 +173,14 @@ versioned tag) keeps everyone on released docs during an assignment.
 With `VECTORMESH_REF=stable`, restart your assistant: the server is fetched fresh on every
 launch, and the tag already points at the newest release.
 
-If you froze a versioned tag instead, pick the target from the
-[releases](https://github.com/raoulg/vectormesh/tags) and change the `VECTORMESH_REF` value in
+If you froze a versioned tag instead, pick the release whose notes mention the coach you want
+from the [releases](https://github.com/raoulg/vectormesh/tags) and change the `VECTORMESH_REF` value in
 your config. In Claude Code, re-running `add` errors if the server already exists, so remove
 first:
 
 ```bash
 claude mcp remove vectormesh -s user
-claude mcp add vectormesh -s user -e VECTORMESH_REF=v0.9.2 -- \
+claude mcp add vectormesh -s user -e VECTORMESH_REF=vX.Y.Z -- \
   sh -c 'uv run --no-project https://raw.githubusercontent.com/raoulg/vectormesh/$VECTORMESH_REF/vectormesh_mcp.py'
 ```
 
@@ -189,10 +192,10 @@ your assistant so it relaunches the server.
 A release is a versioned tag plus moving `stable` onto it, alongside the PyPI publish:
 
 ```bash
-git tag v0.13.0
-git tag -f stable v0.13.0
-git push origin v0.13.0
-git push -f origin stable
+git tag -a vX.Y.Z -m "vX.Y.Z"
+git tag -fa stable -m "stable: vX.Y.Z" "vX.Y.Z^{commit}"
+git push origin vX.Y.Z
+git push -f origin refs/tags/stable
 ```
 
 Everyone on `stable` gets it the next time their assistant starts.
