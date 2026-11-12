@@ -20,6 +20,21 @@ class MeanAggregator(BaseAggregator):
         return tensors.mean(dim=1)
 
 
+class LastAggregator(BaseAggregator):
+    """Aggregate by taking the last step. No learnable parameters.
+
+    After a `Recurrent` this is the state after the whole sequence. Padding is not
+    skipped: after a padder the last step of a short item is padding. `RNNAggregator`
+    skips it.
+    """
+
+    @jaxtyped(typechecker=beartype)
+    def forward(
+        self, tensors: Float[Tensor, "batch _ dim"]
+    ) -> Float[Tensor, "batch dim"]:
+        return tensors[:, -1]
+
+
 class MaskedMeanAggregator(BaseAggregator):
     """Mean aggregator that ignores zero-padded chunks (from FixedPadding).
     Detects padding by checking if all values in a chunk are zero.

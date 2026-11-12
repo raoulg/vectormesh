@@ -2,6 +2,7 @@
 
 from .aggregation import (
     AttentionAggregator,
+    LastAggregator,
     MaskedMeanAggregator,
     MeanAggregator,
     RNNAggregator,
@@ -23,6 +24,7 @@ from .neural import Attention, NeuralNet, Projection, TransformerBlock
 from .normalization import Norm
 from .padding import DynamicPadding, FixedPadding
 from .pipelines import JEPA, Lift, Parallel, Serial, Siamese, Skip
+from .recurrent import Recurrent
 
 __all__ = [
     "JEPA",
@@ -42,6 +44,7 @@ __all__ = [
     "GlobalPool2D",
     "Highway",
     "ImageComponent",
+    "LastAggregator",
     "Lift",
     "MaskedMeanAggregator",
     "MeanAggregator",
@@ -54,6 +57,7 @@ __all__ = [
     "Projection",
     "RNNAggregator",
     "RankPolymorphicComponent",
+    "Recurrent",
     "RepresentationStd",
     "SequenceComponent",
     "Serial",

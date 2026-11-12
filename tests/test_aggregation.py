@@ -2,7 +2,7 @@
 
 import torch
 
-from vectormesh.components import RNNAggregator
+from vectormesh.components import LastAggregator, RNNAggregator
 
 DIM = 4
 
@@ -53,3 +53,15 @@ def test_rnn_takes_an_all_padding_item():
     out = _rnn()(torch.zeros(2, 3, DIM))
     assert out.shape == (2, DIM)
     assert torch.isfinite(out).all()
+
+
+def test_last_returns_the_last_step():
+    x = torch.randn(2, 5, DIM)
+    assert torch.equal(LastAggregator()(x), x[:, -1])
+
+
+def test_last_reads_padding_as_a_step():
+    """Padding at the end is the last step: `LastAggregator` does not skip it."""
+    real = _chunks(3).unsqueeze(0)
+    padded = torch.cat([real, torch.zeros(1, 2, DIM)], dim=1)
+    assert torch.equal(LastAggregator()(padded), torch.zeros(1, DIM))
