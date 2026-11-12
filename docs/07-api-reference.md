@@ -37,7 +37,7 @@ MeanAggregator, MaskedMeanAggregator, AttentionAggregator, RNNAggregator,
 NeuralNet, Projection, Attention, TransformerBlock,
 Concatenate2D, Concatenate3D, ConcatenateSequence, Stack2D,
 Gate, Highway, MoE, SparseMoE,
-GaussianNoise, RepresentationStd
+GaussianNoise, Norm, RepresentationStd
 ```
 
 The first line lists the families (`components/contracts.py`); every other component with a shape
@@ -256,6 +256,7 @@ Output folder name: `{YYYYMMDDHHMMSS}_{dataset_tag}_{column_name}`.
 | `ConcatenateSequence` | `Connector` | `()` | `((B, C1, D), …)` → `(B, ΣC, D)` |
 | `Stack2D` | `Connector` | `()` | `((B, D), …)` → `(B, n, D)` |
 | `Skip` | — (architecture form) | `(transform: nn.Module, in_size: int, projection: nn.Module \| None = None)` | `(…, in_size)` → `(…, out)` |
+| `Norm` | `RankPolymorphicComponent` | `(hidden_size: int, kind: 'layer' \| 'batch' \| 'rms' \| 'none' = 'layer')` | `(…, hidden)` → `(…, hidden)` |
 | `Gate` | `RankPolymorphicComponent` | `(hidden_size: int)` | `(…, hidden)` → `(…, hidden)` |
 | `Highway` | `RankPolymorphicComponent` | `(transform: nn.Module, hidden_size: int)` | `(…, hidden)` → `(…, hidden)` |
 | `MoE` | `RankPolymorphicComponent` | `(experts: list[nn.Module], hidden_size: int, out_size: int)` | `(…, hidden)` → `(…, out)` |

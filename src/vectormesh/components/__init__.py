@@ -17,6 +17,7 @@ from .contracts import (
 from .gating import Gate, Highway, MoE, SparseMoE
 from .metrics import RepresentationStd
 from .neural import Attention, NeuralNet, Projection, TransformerBlock
+from .normalization import Norm
 from .padding import DynamicPadding, FixedPadding
 from .pipelines import JEPA, Lift, Parallel, Serial, Siamese, Skip
 
@@ -39,6 +40,7 @@ __all__ = [
     "MeanAggregator",
     "MoE",
     "NeuralNet",
+    "Norm",
     "Parallel",
     "Projection",
     "RNNAggregator",

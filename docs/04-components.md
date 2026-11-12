@@ -183,6 +183,23 @@ by concatenation.
 
 ---
 
+## 4.5b Normalisation — `normalization.py`
+
+### `Norm(hidden_size, kind="layer")`
+
+```
+layer:  (x - mean(x)) / std(x)      over each vector's features
+batch:  (x - mean_B) / std_B        over the batch, per feature (running stats at eval)
+rms:    x / rms(x)                  over each vector's features, no centring
+none:   x
+```
+
+One component, four values of one axis, so a search can ask "does normalisation help,
+and which" as `tune.choice(["none", "layer", "batch"])`. Any rank: at `(B, C, D)` the
+batch norm pools every chunk of the batch. Keeps the width.
+
+---
+
 ## 4.6 Gating — `gating.py`
 
 The theme of this module is **learned interpolation**: instead of committing to a transform,

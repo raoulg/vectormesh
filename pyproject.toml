@@ -1,6 +1,6 @@
 [project]
 name = "vectormesh"
-version = "0.12.0"
+version = "0.13.0"
 description = "A PyTorch framework for embed once, reuse many times."
 readme = "README.md"
 authors = [
