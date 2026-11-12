@@ -903,17 +903,17 @@ STAGE_ROWS: dict[DesignStage, list[Row]] = {
         ),
         Row(
             "width",
-            "Which range for the model width D?",
+            "Which range for the hidden width (`hidden_size`)?",
             "Much data and compute justify a wide model; little data and compute push the "
             "width down. Think in a range, not a single number.",
-            "a range for D, and the data size behind it",
+            "a range for `hidden_size`, and the data size behind it",
         ),
         Row(
             "width",
-            "Which range for the model width D?",
+            "Which range for the hidden width (`hidden_size`)?",
             "Scaling laws: much data and compute justify a large model; little data and "
-            "compute push D down. Think in a range, not a single number.",
-            "a range for D, and the data size behind it",
+            "compute push it down. Think in a range, not a single number.",
+            "a range for `hidden_size`, and the data size behind it",
             since=3,
         ),
         Row(
