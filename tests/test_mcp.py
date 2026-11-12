@@ -434,3 +434,21 @@ def test_stages_2_to_8_remind_to_append_to_the_log():
     assert reminder not in checklist(stage="problem", lesson=4)
     for stage in mcp_script.STAGE_ORDER[1:]:
         assert reminder in checklist(stage=stage.value), stage
+
+
+def test_budget_says_when_the_long_option_does_not_fit():
+    # 10 minutes of 60 s runs: 10 rounds, 6 reserved, 4 trials. Twice as long: 5 rounds < 6.
+    text = call("vectormesh_search_budget", seconds_per_trial=60, budget_minutes=10)
+    assert "give 0 trials" not in text
+    assert "do not fit" in text
+
+
+def test_budget_too_small_says_what_the_baseline_and_rerun_take():
+    text = call(
+        "vectormesh_search_budget",
+        seconds_per_trial=120,
+        budget_minutes=10,
+        seeds_for_rerun=5,
+    )
+    # 5 seeds twice, one at a time, at 2 minutes a run: 20 minutes.
+    assert "those two alone take 20.0 minutes" in text

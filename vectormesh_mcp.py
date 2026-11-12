@@ -1513,9 +1513,10 @@ class SearchBudget:
     reserved_rounds: int
     search_rounds: int
     trials: int
-    min_budget_minutes: (
-        float  # the smallest budget that leaves room for one search round
-    )
+    # What the baseline and the winner's rerun alone take.
+    reserved_minutes: float
+    # The smallest budget that leaves room for one search round.
+    min_budget_minutes: float
 
 
 def search_budget(
@@ -1538,6 +1539,7 @@ def search_budget(
         reserved_rounds=reserved_rounds,
         search_rounds=search_rounds,
         trials=search_rounds * parallel_trials,
+        reserved_minutes=reserved_rounds * seconds_per_trial / 60,
         min_budget_minutes=(reserved_rounds + 1) * seconds_per_trial / 60,
     )
 
@@ -1567,7 +1569,10 @@ async def vectormesh_search_budget(
         Field(
             ge=1,
             le=100,
-            description="Seeds for the baseline, and again for the winner's rerun.",
+            description=(
+                "Number of seeds for the baseline and for the winner's rerun, each "
+                "(3 means 3 baseline runs and 3 rerun runs)."
+            ),
         ),
     ] = 3,
 ) -> str:
@@ -1583,7 +1588,8 @@ async def vectormesh_search_budget(
         seconds_per_trial (float): wall-clock seconds one training run takes.
         budget_minutes (float): the whole budget in minutes.
         parallel_trials (int): runs that fit side by side (default 1).
-        seeds_for_rerun (int): seeds for the baseline and for the winner's rerun (default 3).
+        seeds_for_rerun (int): number of seeds for the baseline and for the winner's rerun,
+            each (default 3).
 
     Returns:
         str: Markdown with the arithmetic, the number of trials, and the trade as a question.
@@ -1606,9 +1612,10 @@ async def vectormesh_search_budget(
     ]
     if b.trials == 0:
         lines.append(
-            "This budget does not leave room for a search after the baseline and the rerun. "
-            f"The smallest budget that does is {b.min_budget_minutes:.1f} minutes; or shorten "
-            "a run, or run more in parallel."
+            "This budget does not leave room for a search after the baseline and the rerun: "
+            f"those two alone take {b.reserved_minutes:.1f} minutes. The smallest budget with "
+            f"room for one search round is {b.min_budget_minutes:.1f} minutes; or shorten a "
+            "run, or run more in parallel."
         )
         return "\n".join(lines)
 
@@ -1618,13 +1625,23 @@ async def vectormesh_search_budget(
     long = search_budget(
         seconds_per_trial * 2, budget_minutes, parallel_trials, seeds_for_rerun
     )
+    if long.trials:
+        long_option = (
+            f"runs twice as long ({seconds_per_trial * 2:g} s) give {long.trials} trials "
+            "that each train further"
+        )
+    else:
+        long_option = (
+            f"runs twice as long ({seconds_per_trial * 2:g} s) do not fit: the baseline and "
+            f"the rerun alone would take {long.reserved_minutes:.1f} of the "
+            f"{budget_minutes:g} minutes, leaving no room for a search"
+        )
     lines += [
         (
             "**The trade, for the student to decide:** wide and short, or narrow and long? Runs "
             f"half as long ({seconds_per_trial / 2:g} s) give {short.trials} trials to scan a wide "
-            f"space; runs twice as long ({seconds_per_trial * 2:g} s) give {long.trials} trials "
-            "that each train further. Which does this question need: finding the region where "
-            "good configurations live, or comparing a few candidates within it?"
+            f"space; {long_option}. Which does this question need: finding the region where good "
+            "configurations live, or comparing a few candidates within it?"
         ),
     ]
     return "\n".join(lines)
