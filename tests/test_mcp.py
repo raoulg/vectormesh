@@ -421,3 +421,16 @@ def test_advance_boundary_is_min_answer_chars():
     assert "problem" not in state().answers
     checklist(stage="problem", answers="x" * 20)
     assert state().answers["problem"] == "x" * 20
+
+
+def test_stage_1_gives_the_design_a_home():
+    text = checklist(stage="problem", answers=LONG, lesson=3)
+    assert "`design-log.md`" in text
+    assert "restarted server starts empty" in text
+
+
+def test_stages_2_to_8_remind_to_append_to_the_log():
+    reminder = "Append the student's answers to `design-log.md`"
+    assert reminder not in checklist(stage="problem", lesson=4)
+    for stage in mcp_script.STAGE_ORDER[1:]:
+        assert reminder in checklist(stage=stage.value), stage

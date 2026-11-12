@@ -1175,6 +1175,27 @@ _ASK_LESSON = (
 )
 
 
+_PLAN_HOME = (
+    "**Before opening stage 2, give this design a home.** The progress this tool keeps is in "
+    "memory for this server process only: a restarted server starts empty, so it is not the "
+    "record. Keep the record in a plain markdown file, `design-log.md`, next to the student's "
+    "work (their notebook or script), written with your own file tools — this server has "
+    "none of its own. If the student already uses a planning or tracking tool you can reach, "
+    "offer that instead; ask which home they want, but assume one is worth having.\n\n"
+    "Write the first entry now: the lesson, and what stage 1 established in the student's "
+    "words (what is predicted, the metric, the acceptance bound, the no-training floor). "
+    "Append to it after every later stage. To pick up after a restart, read the log, record "
+    "each logged stage again with its logged answers, and continue from the first one that "
+    "is missing.\n\n"
+)
+
+_LOG_REMINDER = (
+    "**Append the student's answers to `design-log.md`** (or the home chosen after stage 1) "
+    "before opening the next stage. That log, not this chat, is the record: a restarted "
+    "server starts empty, and the log is how to pick up."
+)
+
+
 def _next_stage(stage: DesignStage) -> DesignStage | None:
     idx = STAGE_ORDER.index(stage)
     return STAGE_ORDER[idx + 1] if idx + 1 < len(STAGE_ORDER) else None
@@ -1300,6 +1321,8 @@ def _stage_table(stage: DesignStage, state: DesignProgress) -> str:
             "stage."
         ),
     ]
+    if stage is not STAGE_ORDER[0]:
+        lines += ["", _LOG_REMINDER]
     return "\n".join(lines)
 
 
@@ -1310,7 +1333,13 @@ def _completion_summary(state: DesignProgress) -> str:
     ]
     if state.lesson is not None:
         lines += [f"Lesson: **{state.lesson}**", ""]
-    lines += ["What was reasoned through, in order:", ""]
+    lines += [
+        (
+            "What was reasoned through, in order — append this as the closing section of "
+            "`design-log.md` (or the home chosen after stage 1), not as a separate document:"
+        ),
+        "",
+    ]
     for stage in STAGE_ORDER:
         lines.append(f"**{STAGE_TITLE[stage]}**")
         lines.append(f"> {state.answers.get(stage.value, '(not recorded)')}")
@@ -1458,6 +1487,8 @@ async def vectormesh_design_checklist(params: DesignChecklistInput) -> str:
             "has no recorded answer. Here is the first of them.\n\n"
         )
 
+    if stage is STAGE_ORDER[0]:
+        recap += _PLAN_HOME
     table = _stage_table(nxt, state)
     return notes + (
         recap + table if table.startswith(_ASK_LESSON) else ask + recap + table
