@@ -6,7 +6,11 @@ its class, not only its annotation:
 - ``RankPolymorphicComponent``, ``(*lead, dim) -> (*lead, out)``: ``NeuralNet``,
   ``Projection``, ``Gate``, ``Highway``, ``MoE``, ``SparseMoE``, ``GaussianNoise``
 - ``SequenceComponent``, ``(batch, seq, dim) -> (batch, seq, out)``: ``Attention``,
-  ``TransformerBlock``
+  ``TransformerBlock``, ``Recurrent``
+- ``SlidingComponent``, ``(batch, seq, dim) -> (batch, seq_out, out)``: ``Conv1D``,
+  ``Pool1D``
+- ``ImageComponent``, ``(batch, channels, height, width) -> (batch, out, height_out,
+  width_out)``: ``Conv2D``, ``Pool2D``
 - ``BaseAggregator``, ``(batch, _, dim) -> (batch, dim)``: the aggregators
 - ``Connector``, a tuple of branches -> one tensor: ``Concatenate2D``, ``Concatenate3D``,
   ``Stack2D``
@@ -34,6 +38,34 @@ class SequenceComponent(BaseComponent):
     def forward(
         self, tensors: Float[Tensor, "batch seq dim"]
     ) -> Float[Tensor, "batch seq out"]: ...
+
+
+class SlidingComponent(BaseComponent):
+    """Slides a window along the sequence axis: ``(batch, seq, dim) -> (batch, seq_out, out)``.
+
+    The window may shorten the sequence, so the output length has its own name. The
+    channels are the last axis, as everywhere else in the library.
+    """
+
+    @abstractmethod
+    @jaxtyped(typechecker=beartype)
+    def forward(
+        self, tensors: Float[Tensor, "batch seq dim"]
+    ) -> Float[Tensor, "batch seq_out out"]: ...
+
+
+class ImageComponent(BaseComponent):
+    """Maps a batch of images to a batch of images:
+    ``(batch, channels, height, width) -> (batch, out, height_out, width_out)``.
+
+    PyTorch's image layout: the channels are the second axis, not the last.
+    """
+
+    @abstractmethod
+    @jaxtyped(typechecker=beartype)
+    def forward(
+        self, tensors: Float[Tensor, "batch channels height width"]
+    ) -> Float[Tensor, "batch out height_out width_out"]: ...
 
 
 class RankPolymorphicComponent(BaseComponent):

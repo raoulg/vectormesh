@@ -11,8 +11,10 @@ from .connectors import Concatenate2D, Concatenate3D, ConcatenateSequence, Stack
 from .contracts import (
     BaseAggregator,
     Connector,
+    ImageComponent,
     RankPolymorphicComponent,
     SequenceComponent,
+    SlidingComponent,
 )
 from .gating import Gate, Highway, MoE, SparseMoE
 from .metrics import RepresentationStd
@@ -35,6 +37,7 @@ __all__ = [
     "Gate",
     "GaussianNoise",
     "Highway",
+    "ImageComponent",
     "Lift",
     "MaskedMeanAggregator",
     "MeanAggregator",
@@ -50,6 +53,7 @@ __all__ = [
     "Serial",
     "Siamese",
     "Skip",
+    "SlidingComponent",
     "SparseMoE",
     "Stack2D",
     "TransformerBlock",
