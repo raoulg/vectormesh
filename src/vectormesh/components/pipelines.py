@@ -148,8 +148,9 @@ class Siamese(nn.Module):
     reach. Setting it to ``False`` is the ablation, and it collapses reliably.
 
     The EMA update deliberately lives in ``forward`` rather than in the training
-    loop, so this drops into any trainer -- including ``mltrainer.Trainer``, which
-    has no per-step hook -- without that trainer knowing self-supervision exists.
+    loop, so this drops into any trainer -- including a plain
+    ``vectormesh.training.Trainer`` with no custom ``step`` -- without that trainer
+    knowing self-supervision exists.
 
     Args:
         online: the encoder being trained.
