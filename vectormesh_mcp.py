@@ -18,11 +18,11 @@ through two activities the docs describe but a chat window cannot enforce on its
   principled way to pick between them by inspection.
 
 The design conversation (`vectormesh_design_checklist`) is deliberately stateful *within one
-server process* (i.e. for the current session): it returns one stage's checklist at a time, and
-only advances once the assistant reports back what the student actually said. Code comes
-after the last stage. The point is to make
-the assistant cooperate and think *with* the student against this library's own framework, not
-hand them a finished pipeline.
+server process*, one progress per client session: it returns one stage's checklist at a time,
+and only advances once the assistant reports back what the student actually said. Code comes
+after the last stage. A restarted server starts empty; the assistant keeps the record in
+`design-log.md`. The point is to make the assistant cooperate and think *with* the student
+against this library's own framework, not hand them a finished pipeline.
 
 It also exposes the chapters themselves for lookup and keyword search, the same way the
 `codestyle` MCP server exposes its guidelines. It reads `docs/` from disk when they sit next to
