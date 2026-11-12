@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.12"
 # dependencies = ["fastmcp>=2.14.2"]
 # ///
 """MCP server that exposes the VectorMesh course as design/search coaching tools.
@@ -9,15 +9,18 @@ The course is a set of markdown chapters in `docs/`, indexed by the reading-orde
 `docs/README.md`. Unlike a code-review server, this one is forward-looking: it coaches a student
 through two activities the docs describe but a chat window cannot enforce on its own —
 
-- **designing** a new component or architecture from the library's own principles, worked through
-  as a five-stage conversation (tensor shapes -> possible enrichments -> possible flows -> search
-  space -> search practices) rather than handed over as one document to skim;
+- **designing** a deep learning architecture for a problem from the library's own principles,
+  worked through as an eight-stage conversation (problem -> tensors -> pretrained models ->
+  context -> architecture -> search space -> search practices -> results) rather than handed
+  over as one document to skim, offering only the architectures of the student's lesson or
+  earlier;
 - **searching** an architecture with Ray Tune once there is more than one plausible design and no
   principled way to pick between them by inspection.
 
 The design conversation (`vectormesh_design_checklist`) is deliberately stateful *within one
 server process* (i.e. for the current session): it returns one stage's checklist at a time, and
-only advances once the assistant reports back what the student actually said. The point is to make
+only advances once the assistant reports back what the student actually said. Code comes
+after the last stage. The point is to make
 the assistant cooperate and think *with* the student against this library's own framework, not
 hand them a finished pipeline.
 
@@ -34,10 +37,9 @@ import os
 import re
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Optional
 
 from fastmcp import FastMCP
 from pydantic import BaseModel, ConfigDict, Field
@@ -93,7 +95,7 @@ mcp = FastMCP("vectormesh_mcp")
 class Chapter:
     """One row of the docs/README.md reading-order table."""
 
-    number: int  # 1..9
+    number: int  # 1..10
     title: str  # human-readable chapter title, e.g. "Core concepts"
     file: str  # doc filename, e.g. "01-core-concepts.md"
     summary: str  # one-line "what it covers"
@@ -136,7 +138,7 @@ for _c in CHAPTERS:
     _BY_KEY[_c.title.lower()] = _c
 
 
-def _find_chapter(query: str) -> Optional[Chapter]:
+def _find_chapter(query: str) -> Chapter | None:
     """Resolve a chapter by number, filename, stem, or title (case-insensitive)."""
     key = query.strip().lower()
     if key in _BY_KEY:
@@ -197,7 +199,7 @@ class ListConceptsInput(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
-    keyword: Optional[str] = Field(
+    keyword: str | None = Field(
         default=None,
         description=(
             "Optional substring filter, matched case-insensitively against each chapter's "
@@ -267,7 +269,7 @@ async def vectormesh_list_concepts(params: ListConceptsInput) -> str:
 
     Args:
         params (ListConceptsInput):
-            - keyword (Optional[str]): if set, keep only chapters whose title or summary
+            - keyword (str | None): if set, keep only chapters whose title or summary
               contains this substring (case-insensitive).
 
     Returns:
@@ -388,35 +390,107 @@ async def vectormesh_search(params: SearchInput) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# The design conversation — five stages, walked through one at a time
+# The design conversation — eight stages, walked through one at a time
 # --------------------------------------------------------------------------- #
 
 
 class DesignStage(str, Enum):
     """A stage in the pre-design conversation, in the order it must happen."""
 
+    problem = "problem"
     tensors = "tensors"
-    enrichments = "enrichments"
-    flows = "flows"
+    pretrained = "pretrained"
+    context = "context"
+    architecture = "architecture"
     search_space = "search_space"
     search_practices = "search_practices"
+    results = "results"
 
 
 STAGE_ORDER: list[DesignStage] = [
+    DesignStage.problem,
     DesignStage.tensors,
-    DesignStage.enrichments,
-    DesignStage.flows,
+    DesignStage.pretrained,
+    DesignStage.context,
+    DesignStage.architecture,
     DesignStage.search_space,
     DesignStage.search_practices,
+    DesignStage.results,
 ]
 
 STAGE_TITLE: dict[DesignStage, str] = {
-    DesignStage.tensors: "1. What do you actually have? (tensor shapes)",
-    DesignStage.enrichments: "2. What else could you add? (enrichments)",
-    DesignStage.flows: "3. Which compositions are even on the table? (flows)",
-    DesignStage.search_space: "4. What are you actually uncertain about? (search space)",
-    DesignStage.search_practices: "5. Before you trust any result (search practices)",
+    DesignStage.problem: "1. What is the problem, and what is good enough? (problem)",
+    DesignStage.tensors: "2. What do you actually have? (tensor shapes)",
+    DesignStage.pretrained: "3. Who has already learned this? (pretrained models)",
+    DesignStage.context: "4. What else could you add? (context)",
+    DesignStage.architecture: "5. Which compositions are on the table? (architecture)",
+    DesignStage.search_space: "6. What are you actually uncertain about? (search space)",
+    DesignStage.search_practices: "7. Before you trust any result (search practices)",
+    DesignStage.results: "8. Reading and sharing the runs (results)",
 }
+
+# What the student has met in each lesson of the course. `components` are names exported by
+# vectormesh (tests/test_mcp.py imports every one, so the table cannot drift from the
+# library); `ideas` are the techniques and tools of that lesson that are not a component.
+LESSONS: dict[int, dict[str, tuple[str, ...]]] = {
+    1: {
+        "components": (
+            "NeuralNet",
+            "Projection",
+            "Parallel",
+            "Concatenate2D",
+            "GaussianNoise",
+        ),
+        "ideas": (
+            "linear and MLP heads on frozen pretrained image encoders (caches)",
+            "`Parallel` fusion with `Concatenate2D`",
+            "ray tune search",
+            "mlflow",
+        ),
+    },
+    2: {
+        "components": (),
+        "ideas": ("windowing", "1D convolution", "RNN / GRU / LSTM", "N-BEATS", "MASE"),
+    },
+    3: {
+        "components": ("Gate", "Highway", "MoE", "SparseMoE", "Skip"),
+        "ideas": ("scaling curves", "search algorithms"),
+    },
+    4: {
+        "components": (
+            "Attention",
+            "TransformerBlock",
+            "MeanAggregator",
+            "MaskedMeanAggregator",
+            "AttentionAggregator",
+            "RNNAggregator",
+        ),
+        "ideas": ("tokenization", "chunk aggregators", "regex feature streams"),
+    },
+    5: {
+        "components": ("Siamese", "JEPA", "PatchImageVectorizer"),
+        "ideas": ("self-supervised learning", "patch tokens"),
+    },
+    6: {
+        "components": (),
+        "ideas": (
+            "probabilistic heads",
+            "conformal prediction",
+            "cost-driven decisions",
+        ),
+    },
+    7: {
+        "components": (),
+        "ideas": (
+            "time-series foundation models",
+            "LLMs as judge",
+            "the cascade (router to head or LLM)",
+        ),
+    },
+}
+
+FIRST_LESSON = min(LESSONS)
+LAST_LESSON = max(LESSONS)
 
 
 def _core() -> str:
@@ -431,6 +505,10 @@ def _data() -> str:
     return _chapter_ref(_must_find_chapter("03"))
 
 
+def _arch_ch() -> str:
+    return _chapter_ref(_must_find_chapter("05"))
+
+
 def _teaching() -> str:
     return _chapter_ref(_must_find_chapter("08"))
 
@@ -439,24 +517,39 @@ def _search_ch() -> str:
     return _chapter_ref(_must_find_chapter("09"))
 
 
+def _reporters() -> str:
+    return _chapter_ref(_must_find_chapter("10"))
+
+
 STAGE_INTRO: dict[DesignStage, str] = {
-    DesignStage.tensors: (
-        "Before anything gets designed, pin down what shape the data is actually in. Most "
-        f"downstream confusion — and most `BeartypeCallHintParamViolation`s ({_contracts()}) — "
-        "traces back to skipping this."
+    DesignStage.problem: (
+        "Before any data gets touched, pin down what the model is for and how good it has to "
+        "be. Every later stage is measured against the metric and the acceptance bound named "
+        "here; without them, no model is ever finished and no simpler one is ever good enough."
     ),
-    DesignStage.enrichments: (
+    DesignStage.tensors: (
+        "Now pin down what shape the data is actually in. Most downstream confusion — and most "
+        f"`BeartypeCallHintParamViolation`s ({_contracts()}) — traces back to skipping this."
+    ),
+    DesignStage.pretrained: (
+        f"Embed once, reuse many times ({_core()}): a pretrained encoder may already have "
+        "learned most of what this task needs. You may search the HuggingFace Hub for the "
+        "student, but the rationale stays theirs. The rule for this stage: the simplest model "
+        "that meets the acceptance bound."
+    ),
+    DesignStage.context: (
         "Architecture is not the only lever. Before reaching for a fancier composition, ask "
         "what extra signal could be added at the data layer — often cheaper, and sometimes it "
         "makes the architecture question moot."
     ),
-    DesignStage.flows: (
+    DesignStage.architecture: (
         "Only now — with the shapes and the streams named — does it make sense to ask which "
-        f"compositions ({_core()} §1.6) are even possible. Picking a mechanism before this point "
-        "is picking a hammer before knowing what the object is."
+        f"compositions ({_core()} §1.6, {_arch_ch()} §5.7) are possible. Start with the "
+        "baseline, then go up in complexity only when the baseline falls short of the "
+        "acceptance bound."
     ),
     DesignStage.search_space: (
-        "Not everything from stages 1-3 needs to be searched — only what is genuinely "
+        "Not everything from the earlier stages needs to be searched — only what is genuinely "
         "undecided. This stage turns open questions into a search space, not the other way "
         "around."
     ),
@@ -464,159 +557,377 @@ STAGE_INTRO: dict[DesignStage, str] = {
         "Before any result from that search gets trusted, a few habits separate a real finding "
         f"from a rounding error. Full detail: {_search_ch()}."
     ),
+    DesignStage.results: (
+        "A search is finished when someone else can read it: the runs answer the hypothesis, "
+        f"and they are shared so that others can see who made them and what was explored "
+        f"({_search_ch()} §9.8, {_reporters()})."
+    ),
 }
 
 # Each row: (question, why it matters, what a good answer names)
 StageRow = tuple[str, str, str]
 
 STAGE_ROWS: dict[DesignStage, list[StageRow]] = {
+    DesignStage.problem: [
+        (
+            "What is predicted, from what, and for whom?",
+            (
+                "Names both ends of the pipeline and the person who acts on its output, which "
+                "decides which mistakes are expensive."
+            ),
+            "the target, the input, and who uses the prediction",
+        ),
+        (
+            "Is deep learning needed at all? Could a simple algorithm or symbolic logic do it?",
+            (
+                "A regex extracts an e-mail address better than an agentic model. A learned model "
+                "earns its place only where a rule cannot be written down."
+            ),
+            "the simplest non-learned approach, and why it does or does not suffice",
+        ),
+        (
+            (
+                "Which metrics, and why those? (accuracy, precision, recall, F1; a task-specific "
+                "one such as MASE for forecasting)"
+            ),
+            "The metric decides what 'better' means for every comparison that follows.",
+            "the metric(s), tied to which mistake costs the most",
+        ),
+        (
+            "What is the acceptance bound: the lowest score that is good enough to use?",
+            (
+                "95%? 90%? In some settings 51% already pays, because slightly better than guessing "
+                "beats guessing. The bound is what 'the simplest model that meets it' is measured "
+                "against."
+            ),
+            "a number on the chosen metric, and why that number",
+        ),
+        (
+            f"What would a no-training floor score? ({_search_ch()} §9.2)",
+            (
+                "If the floor already clears the bound, the rest of this conversation is about "
+                "cost, not about accuracy."
+            ),
+            "the floor method (e.g. cosine centroid) and its score or an estimate",
+        ),
+    ],
     DesignStage.tensors: [
         (
             "What is your raw input, per item, and roughly how big is one item?",
-            "Determines which `Vectorizer` you need and whether chunking is even a concept for "
-            "your data.",
+            (
+                "Determines which `Vectorizer` you need and whether chunking is even a concept for "
+                "your data."
+            ),
             "the modality (text / image / timeseries window / tabular row) and a rough size",
         ),
         (
-            f"After vectorizing ONE item, what shape do you get? ({_core()} §1.3)",
-            "This is your starting rung on the tensor-flow ladder — everything else is a move "
-            "from here.",
+            "What preprocessor turns the raw data into a tensor?",
+            "The preprocessor fixes the tensor every later stage works with.",
+            "the `Vectorizer` (or other preprocessor) by name",
+        ),
+        (
+            f"After vectorizing ONE item, what shape do you get, and what rank? ({_core()} §1.3)",
+            (
+                "This is your starting rung on the tensor-flow ladder — everything else is a move "
+                "from here."
+            ),
             "`(D,)` a single vector, or `(C, D)` a variable-length set of chunks",
         ),
         (
+            "What does each axis of that tensor mean?",
+            "An axis without a meaning cannot be reduced, padded or fused on purpose.",
+            "a name per axis (e.g. chunks, time steps, features)",
+        ),
+        (
             "If it's `(C, D)`, how much does `C` vary across items?",
-            "Decides whether `FixedPadding` or `DynamicPadding` is right, and whether "
-            "truncation would lose real signal.",
+            (
+                "Decides whether `FixedPadding` or `DynamicPadding` is right, and whether "
+                "truncation would lose real signal."
+            ),
             "a rough distribution, e.g. 'mostly under 20, a tail past 150'",
         ),
         (
             "What shape do you need going INTO the loss function?",
-            "Names the far end of the ladder you're building toward, so you can check the "
-            "whole path rather than only the start.",
+            (
+                "Names the far end of the ladder you're building toward, so you can check the "
+                "whole path rather than only the start."
+            ),
             "`(B, K)` logits for classification, `(B, 1)` for regression, etc.",
         ),
         (
             "How many separate representations do you have of the same item?",
-            "One stream stays a `Serial` chain. More than one is a fusion problem before it's "
-            "an architecture problem (see stage 3).",
+            (
+                "One stream stays a `Serial` chain. More than one is a fusion problem before it's "
+                "an architecture problem (see stage 5)."
+            ),
             "a count, and which encoder/feature-extractor produced each one",
         ),
     ],
-    DesignStage.enrichments: [
+    DesignStage.pretrained: [
         (
-            "Is there a hand-designed, interpretable signal specific to your domain that a "
-            "frozen encoder wouldn't see on its own?",
-            "Interpretable isn't automatically worse — a hand-written regex vector beats a "
-            "dense embedding on small data in this course's own notebooks.",
+            "Is there a pretrained or foundation model for this modality?",
+            (
+                "Training a head on frozen vectors costs seconds; training an encoder costs days. "
+                "Search the HuggingFace Hub with the student if they ask."
+            ),
+            "a candidate model, by name",
+        ),
+        (
+            "What was it trained on, and does that resemble this data?",
+            "An encoder only helps as far as its training data resembles yours.",
+            "its training data, and one way this data differs",
+        ),
+        (
+            "Can this hardware run it?",
+            "The encoder runs once, to fill the cache — but it has to run that once.",
+            "the model size and where it will run",
+        ),
+        (
+            (
+                "Is the best model worth it, when a simpler one already clears the bound with "
+                "cosine similarity alone?"
+            ),
+            (
+                "The simplest model that meets the acceptance bound wins; a larger one has to "
+                "earn its cost."
+            ),
+            "the cosine floor of the simpler model, against the bound",
+        ),
+    ],
+    DesignStage.context: [
+        (
+            "What contextual information could be added: other sensors, domain knowledge?",
+            (
+                "Often absent for a handed-out dataset, often present for your own. Extra signal "
+                "at the data layer is usually cheaper than extra architecture."
+            ),
+            "a candidate source, or why there is none",
+        ),
+        (
+            (
+                "Is there a hand-designed, interpretable signal specific to your domain that a "
+                "frozen encoder wouldn't see on its own?"
+            ),
+            (
+                "Interpretable isn't automatically worse — a hand-written regex vector beats a "
+                "dense embedding on small data in this course's own notebooks."
+            ),
             "a candidate feature, and why it isn't redundant with the embedding",
         ),
         (
-            "If your modality is sequential or time-based, have you considered spectral or "
-            "decomposition features (FFT magnitude, trend/seasonality, lag or rolling stats)?",
-            "VectorMesh doesn't ship these out of the box — only `RegexVectorizer` and "
-            "`ImageVectorizer` exist today — so this is a build-it-yourself decision, the same "
-            "shape as an existing `Vectorizer`, not a missing feature to wait for.",
+            (
+                "If your modality is sequential or time-based, have you considered spectral or "
+                "decomposition features (FFT magnitude, trend/seasonality, lag or rolling stats)?"
+            ),
+            (
+                "VectorMesh doesn't ship these out of the box — only `RegexVectorizer` and "
+                "`ImageVectorizer` exist today — so this is a build-it-yourself decision, the same "
+                "shape as an existing `Vectorizer`, not a missing feature to wait for."
+            ),
             "the specific transform, and the shape it produces per item",
         ),
         (
             "Is a second pretrained encoder available that might see something different?",
-            "Only worth the extra cost if it's likely to make *different* mistakes than the "
-            "first — not just more of the same signal at a different resolution.",
+            (
+                "Only worth the extra cost if it's likely to make *different* mistakes than the "
+                "first — not just more of the same signal at a different resolution."
+            ),
             "the second encoder, and one concrete reason it might disagree with the first",
         ),
         (
-            f"For each enrichment: is it a new column on an EXISTING cache, or a new cache "
-            f"entirely? ({_core()} §1.7, {_data()})",
-            "Extending a cache adds the cheap feature without recomputing the expensive "
-            "embedding — that's the whole reason `metadata.json` records what's already there.",
+            "Does the added context make this multimodal, and where would the streams meet?",
+            "Two kinds of vector need a meeting point; naming it here is what stage 5 builds.",
+            "the streams, and the point where they meet",
+        ),
+        (
+            (
+                f"For each enrichment: is it a new column on an EXISTING cache, or a new cache "
+                f"entirely? ({_core()} §1.7, {_data()})"
+            ),
+            (
+                "Extending a cache adds the cheap feature without recomputing the expensive "
+                "embedding — that's the whole reason `metadata.json` records what's already there."
+            ),
             "which cache gets extended, or why a fresh one is actually needed",
         ),
         (
-            "Is this enrichment something that should eventually be LEARNED instead of "
-            f"hand-designed? ({_teaching()}, cross-cutting thread #2)",
-            "Moving a decision across the learned-vs-designed line — e.g. mean pooling to "
-            "attention pooling — is the core creative move this course is built to teach.",
+            (
+                "Is this enrichment something that should eventually be LEARNED instead of "
+                f"hand-designed? ({_teaching()}, cross-cutting thread #2)"
+            ),
+            (
+                "Moving a decision across the learned-vs-designed line — e.g. mean pooling to "
+                "attention pooling — is the core creative move this course is built to teach."
+            ),
             "which side of the line it's on today, and whether that's a temporary choice",
         ),
     ],
-    DesignStage.flows: [
+    DesignStage.architecture: [
         (
-            "Given stage 1: do you have one stream or several, and which?",
-            "One stream -> a `Serial` chain is probably enough. Several -> there's a fusion "
-            "decision before there's an architecture decision.",
+            "What is the baseline: the simplest head on the tensor from stage 2?",
+            (
+                "Every step up in complexity is measured against it; without it, a complex model "
+                "has nothing to beat."
+            ),
+            "the baseline pipeline, by component name",
+        ),
+        (
+            "Given stages 2 and 4: do you have one stream or several, and which?",
+            (
+                "One stream -> a `Serial` chain is probably enough. Several -> there's a fusion "
+                "decision before there's an architecture decision."
+            ),
             "the count and identity of each stream",
         ),
         (
-            "If several: do they fuse per-chunk (before aggregation) or per-document (after)?",
-            "Fusing before aggregation lets cross-stream interaction happen at the token/chunk "
-            "level; fusing after is cheaper and usually the safer default.",
-            "the choice, and the connector it implies (`Concatenate3D` before vs "
-            "`Concatenate2D`/`Stack2D` after)",
+            "If several: how are vectors of different kinds connected?",
+            "Fusion at document level is the cheapest meeting point and the usual default.",
+            "the connector (e.g. `Parallel` + `Concatenate2D`)",
         ),
         (
-            f"Where exactly does reduction happen? ({_core()} §1.3 — aggregation is the ONLY "
-            "rank-reducing step)",
-            "This is the single most consequential structural decision in a pipeline — get it "
-            "vague and everything downstream is guesswork.",
+            "If several: do they fuse per-chunk (before aggregation) or per-document (after)?",
+            (
+                "Fusing before aggregation lets cross-stream interaction happen at the token/chunk "
+                "level; fusing after is cheaper and usually the safer default."
+            ),
+            (
+                "the choice, and the connector it implies (`Concatenate3D` before vs "
+                "`Concatenate2D`/`Stack2D` after)"
+            ),
+        ),
+        (
+            (
+                f"Where exactly does reduction happen? ({_core()} §1.3 — aggregation is the ONLY "
+                "rank-reducing step)"
+            ),
+            (
+                "This is the single most consequential structural decision in a pipeline — get it "
+                "vague and everything downstream is guesswork."
+            ),
             "which aggregator, at which point in the pipeline",
         ),
         (
-            "Is there a real reason some inputs need MORE computation than others (conditional "
-            "computation), or is a uniform transform enough?",
-            f"This is the question that justifies climbing the `Skip -> Gate -> Highway -> MoE` "
-            f"ladder ({_teaching()}, cross-cutting thread #3) at all — not 'MoE sounds "
-            "powerful'.",
+            (
+                "May the tensor be reconsidered to fit an architecture (a time series reshaped to "
+                "2D or 3D so that a CNN can scan it)?"
+            ),
+            "The tensor from stage 2 is the obvious one, not the only one.",
+            "the reshape, and the architecture it opens up",
+        ),
+        (
+            (
+                "Is there a real reason some inputs need MORE computation than others (conditional "
+                "computation), or is a uniform transform enough?"
+            ),
+            (
+                f"This is the question that justifies climbing the `Skip -> Gate -> Highway -> MoE` "
+                f"ladder ({_teaching()}, cross-cutting thread #3) at all — not 'MoE sounds "
+                "powerful'."
+            ),
             "plain transform, or which rung and the concrete reason",
         ),
         (
-            "Can you sketch the whole thing as nested `Serial`/`Parallel` calls, using only "
-            f"existing components? ({_core()} §1.6)",
-            "If you can't, either the idea needs a genuinely new component, or it isn't concrete "
-            "enough yet to build.",
+            "Which range for the model width D?",
+            (
+                "Scaling laws: much data and compute justify a large model; little data and "
+                "compute push D down. Think in a range, not a single number."
+            ),
+            "a range for D, and the data size behind it",
+        ),
+        (
+            (
+                "Can you sketch the whole thing as nested `Serial`/`Parallel` calls, using only "
+                f"existing components? ({_core()} §1.6)"
+            ),
+            (
+                "If you can't, either the idea needs a genuinely new component, or it isn't concrete "
+                "enough yet to build."
+            ),
             "a few lines of pseudocode naming real component classes",
         ),
     ],
     DesignStage.search_space: [
         (
-            "Which decisions from stages 1-3 are you genuinely UNSURE about, versus already "
-            "decided?",
-            "A search space should only contain what you don't already know the answer to — "
-            "searching a decided axis just wastes trials.",
+            (
+                "Which decisions from the earlier stages are you genuinely UNSURE about, versus "
+                "already decided?"
+            ),
+            (
+                "A search space should only contain what you don't already know the answer to — "
+                "searching a decided axis just wastes trials."
+            ),
             "the 2-5 axes actually in question",
         ),
         (
-            f"For each axis: is it independent, or conditional on another axis's value? "
-            f"({_search_ch()} §9.4)",
-            "Conditional axes (e.g. `n_experts` only matters if `mechanism == 'moe'`) get "
-            "wastefully sampled by most search algorithms — name them so the waste isn't a "
-            "surprise later.",
+            (
+                "Which hyperparameters, and which ranges: width, depth, learning rate, scheduler, "
+                "training length?"
+            ),
+            (
+                "A range too narrow hides the answer; one too wide spends trials where nothing "
+                "works."
+            ),
+            "a range per axis",
+        ),
+        (
+            (
+                f"For each axis: is it independent, or conditional on another axis's value? "
+                f"({_search_ch()} §9.4)"
+            ),
+            (
+                "Conditional axes (e.g. `n_experts` only matters if `mechanism == 'moe'`) get "
+                "wastefully sampled by most search algorithms — name them so the waste isn't a "
+                "surprise later."
+            ),
             "which axes are conditional on which",
         ),
         (
             "Which axes could CONFOUND the comparison you actually care about, if left fixed?",
-            "If `lr` is fixed while searching `mechanism`, a win might just mean the fixed "
-            "learning rate happened to suit one mechanism.",
+            (
+                "If `lr` is fixed while searching `mechanism`, a win might just mean the fixed "
+                "learning rate happened to suit one mechanism."
+            ),
             "at least one confounder being included for this reason",
         ),
         (
-            "Roughly how many trials can you afford, given how long one run takes?",
-            "Sets `num_samples` honestly instead of picking a round number that sounds fine.",
-            "a number, and the arithmetic behind it (trials x seconds-per-trial)",
+            (
+                "What is the budget (ten minutes, an hour), and how many trials fit in it? "
+                "(`vectormesh_search_budget` does the arithmetic)"
+            ),
+            (
+                "Sets `num_samples` honestly instead of picking a round number that sounds fine, "
+                "after reserving the baseline and the winner's rerun."
+            ),
+            "the budget, seconds per trial, and the trial count that follows",
+        ),
+        (
+            "Many short trials in a wide scan, or fewer long ones?",
+            (
+                "A wide, short scan finds the region; fewer, longer trials compare candidates "
+                "within it. One budget buys one or the other."
+            ),
+            "the choice, and why it fits this question",
         ),
         (
             "What is the ONE metric the search optimizes for?",
-            "`tune.TuneConfig` needs exactly one metric and mode — decide before writing the "
-            "search space, not after reading confusing results.",
+            (
+                "`tune.TuneConfig` needs exactly one metric and mode — decide before writing the "
+                "search space, not after reading confusing results."
+            ),
             "the metric name and whether it's maximised or minimised",
         ),
     ],
     DesignStage.search_practices: [
         (
-            f"What's the cheapest possible baseline, with NO training at all? ({_search_ch()} "
-            "§9.2)",
-            "A cosine-similarity/nearest-centroid classifier on the frozen embeddings gives you "
-            "the floor before a single epoch runs. If a trained model can't clear it, the "
-            "architecture usually isn't the problem.",
+            (
+                f"What's the cheapest possible baseline, with NO training at all? ({_search_ch()} "
+                "§9.2)"
+            ),
+            (
+                "A cosine-similarity/nearest-centroid classifier on the frozen embeddings gives you "
+                "the floor before a single epoch runs. If a trained model can't clear it, the "
+                "architecture usually isn't the problem."
+            ),
             "the floor score and how it was computed",
         ),
         (
@@ -626,99 +937,293 @@ STAGE_ROWS: dict[DesignStage, list[StageRow]] = {
         ),
         (
             f"How are you deciding when to stop training a trial? ({_search_ch()} §9.5)",
-            "A fixed, guessed epoch count silently under-trains some configs and over-trains "
-            "others — which then looks like an architecture effect. Default to a generous "
-            "epoch CEILING plus an adaptive rule (plateau scheduler + early stop) instead.",
+            (
+                "A fixed, guessed epoch count silently under-trains some configs and over-trains "
+                "others — which then looks like an architecture effect. Default to a generous "
+                "epoch CEILING plus an adaptive rule (plateau scheduler + early stop) instead."
+            ),
             "the stopping rule, named explicitly — not just an epoch number",
         ),
         (
+            f"How many seeds is the winner rerun over? ({_search_ch()} §9.7)",
+            "The best single trial is partly luck; its rerun over seeds is the result.",
+            "the number of seeds",
+        ),
+        (
             f"How will a search result become a CLAIM, not just a number? ({_search_ch()} §9.7)",
-            "Effect size in units of the trained baseline's own sigma, compared against the "
-            "no-training floor for context — not the raw difference.",
+            (
+                "Effect size in units of the trained baseline's own sigma, compared against the "
+                "no-training floor for context — not the raw difference."
+            ),
             "the formula that will be applied",
         ),
         (
             f"Where and how often will you log? ({_search_ch()} §9.8)",
-            "Once, after the whole search finishes — never per-trial into a shared sqlite "
-            "backend, which concurrent trial processes will corrupt.",
+            (
+                "Once, after the whole search finishes — never per-trial into a shared sqlite "
+                "backend, which concurrent trial processes will corrupt."
+            ),
             "the logging plan",
+        ),
+    ],
+    DesignStage.results: [
+        (
+            f"Which mlflow views will you read? ({_reporters()} §10.1)",
+            (
+                "A table of runs, a chart of the metric against model size, and per-epoch curves "
+                "answer different questions."
+            ),
+            "the views",
+        ),
+        (
+            "Which comparison answers the hypothesis?",
+            (
+                "The winner's rerun against the baseline, in units of the baseline's sigma, is the "
+                "comparison a claim rests on."
+            ),
+            "the two runs (or groups) compared, and on which metric",
+        ),
+        (
+            "Does the result clear the acceptance bound from stage 1?",
+            "The bound was set before the search, so it cannot be moved to fit the result.",
+            "yes or no, and the margin",
+        ),
+        (
+            (
+                "How are the runs shared? If the course has a run-sharing protocol "
+                "(`docs/submit-runs.md` in the course repository), the runs go through it."
+            ),
+            "A result nobody else can read cannot be checked or built on.",
+            "the protocol or channel",
+        ),
+        (
+            (
+                "Is each run named and tagged so that someone else can see who made it and what "
+                "was explored?"
+            ),
+            (
+                "Untagged runs from several students cannot be told apart, nor a baseline from a "
+                "trial."
+            ),
+            "the run names and tags (who, and which role: baseline, trial, final)",
         ),
     ],
 }
 
-# In-memory record of what the student said at each stage, for THIS server process (i.e. this
-# session). Resets when the server restarts — the design conversation is meant to happen in one
-# sitting, not to persist silently across days.
-_progress: dict[str, str] = {}
+# The lesson in which an architecture row's components appear. A row whose lesson is later
+# than the student's is left out of the table; rows not listed here are always shown.
+ROW_LESSON: dict[str, int] = {
+    "If several: do they fuse per-chunk (before aggregation) or per-document (after)?": 4,
+    f"Where exactly does reduction happen? ({_core()} §1.3 — aggregation is the ONLY "
+    "rank-reducing step)": 4,
+    "May the tensor be reconsidered to fit an architecture (a time series reshaped to "
+    "2D or 3D so that a CNN can scan it)?": 2,
+    "Is there a real reason some inputs need MORE computation than others (conditional "
+    "computation), or is a uniform transform enough?": 3,
+}
+
+
+@dataclass
+class DesignProgress:
+    """What the student said at each stage, and which lesson they are in."""
+
+    answers: dict[str, str] = field(default_factory=dict)
+    lesson: int | None = None
+
+
+# In-memory record for THIS server process (i.e. this session). Resets when the server
+# restarts — the design conversation is meant to happen in one sitting, not to persist
+# silently across days.
+_state = DesignProgress()
 
 MIN_ANSWER_CHARS = 20
 
+# Which earlier stage's recorded answer a later stage's checklist is read against, and the
+# framing that turns the quote into an instruction rather than a reminder.
+_WIRED_FROM: dict[DesignStage, tuple[DesignStage, str]] = {
+    DesignStage.pretrained: (
+        DesignStage.problem,
+        (
+            "**The metric and acceptance bound from stage 1:** {answer}\n\nA pretrained model is "
+            "good enough the moment it clears that bound; the questions below ask whether a "
+            "simpler one already does."
+        ),
+    ),
+    DesignStage.search_space: (
+        DesignStage.problem,
+        (
+            "**The metric and acceptance bound from stage 1:** {answer}\n\nThe search optimizes "
+            "that metric. A search that cannot reach the bound within the budget is the wrong "
+            "search, not a reason to lower the bound."
+        ),
+    ),
+    DesignStage.results: (
+        DesignStage.problem,
+        (
+            "**The metric and acceptance bound from stage 1:** {answer}\n\nRead every run against "
+            "that metric and that bound — the ones set before the search, not new ones chosen "
+            "after reading the results."
+        ),
+    ),
+}
 
-def _next_stage(stage: DesignStage) -> Optional[DesignStage]:
+_ASK_LESSON = (
+    "**First ask the student which lesson of the course they are in "
+    f"({FIRST_LESSON} to {LAST_LESSON}).** Stage 5 offers only the architectures of that "
+    "lesson or earlier. Pass it as `lesson=<N>` on the next call to "
+    "`vectormesh_design_checklist`; it is kept with the progress.\n\n"
+)
+
+
+def _next_stage(stage: DesignStage) -> DesignStage | None:
     idx = STAGE_ORDER.index(stage)
     return STAGE_ORDER[idx + 1] if idx + 1 < len(STAGE_ORDER) else None
 
 
+def _offered_lessons(lesson: int | None) -> list[int]:
+    """The lessons whose material may be offered to a student in `lesson` (all if unknown)."""
+    if lesson is None:
+        return sorted(LESSONS)
+    return [n for n in sorted(LESSONS) if n <= lesson]
+
+
+def offered_components(lesson: int | None) -> list[str]:
+    """The vectormesh components a student in `lesson` has met (all if unknown)."""
+    return [c for n in _offered_lessons(lesson) for c in LESSONS[n]["components"]]
+
+
+def _lesson_line(number: int) -> str:
+    entry = LESSONS[number]
+    parts = [f"`{c}`" for c in entry["components"]] + list(entry["ideas"])
+    return ", ".join(parts)
+
+
+def _lesson_block(lesson: int | None) -> str:
+    """The lesson table for stage 5: what is offered, and what comes later."""
+    if lesson is None:
+        lines = [
+            (
+                "**Architectures by lesson.** The student's lesson is not known yet: ask it, and "
+                "offer only that lesson's row and earlier ones."
+            ),
+            "",
+        ]
+        lines += [f"- lesson {n}: {_lesson_line(n)}" for n in sorted(LESSONS)]
+        return "\n".join(lines)
+
+    lines = [f"**Offered at lesson {lesson}** (what the student has met so far):", ""]
+    lines += [f"- lesson {n}: {_lesson_line(n)}" for n in _offered_lessons(lesson)]
+    later = [n for n in sorted(LESSONS) if n > lesson]
+    if later:
+        lines += [
+            "",
+            (
+                "**Not offered yet.** If the student reaches for one of these, name it as "
+                '"comes in lesson N" and stay with what is offered:'
+            ),
+            "",
+        ]
+        lines += [f"- comes in lesson {n}: {_lesson_line(n)}" for n in later]
+    return "\n".join(lines)
+
+
+def _rows(stage: DesignStage) -> list[StageRow]:
+    rows = STAGE_ROWS[stage]
+    if stage is not DesignStage.architecture or _state.lesson is None:
+        return rows
+    lesson = _state.lesson
+    return [row for row in rows if ROW_LESSON.get(row[0], FIRST_LESSON) <= lesson]
+
+
 def _roadmap() -> str:
     lines = [
-        "# Designing something new with VectorMesh — a five-stage conversation",
+        "# Designing something new with VectorMesh — an eight-stage conversation",
         "",
-        "This is deliberately not a single document to skim. Work through these five stages with "
-        "the student, in order, one call to this tool per stage — each later stage assumes the "
-        "earlier ones were actually reasoned through together, not skipped.",
+        (
+            "This is deliberately not a single document to skim. Work through these eight stages "
+            "with the student, in order, one call to this tool per stage — each later stage "
+            "assumes the earlier ones were actually reasoned through together, not skipped. Code "
+            "comes after the last stage, not before."
+        ),
         "",
     ]
-    for i, stage in enumerate(STAGE_ORDER, start=1):
-        mark = "✅" if stage.value in _progress else "▢"
-        lines.append(f"{mark} {i}. **{STAGE_TITLE[stage]}**")
+    if _state.lesson is not None:
+        lines += [f"Lesson: **{_state.lesson}**", ""]
+    for stage in STAGE_ORDER:
+        mark = "✅" if stage.value in _state.answers else "▢"
+        lines.append(f"{mark} **{STAGE_TITLE[stage]}** (`{stage.value}`)")
     lines += [
         "",
-        'Call this tool again with `stage="tensors"` to begin — always start there for a new '
-        "idea, even if it feels obvious; stage 3 depends on what stage 1 actually established.",
+        (
+            'Call this tool again with `stage="problem"` to begin — always start there for a new '
+            "idea, even if it feels obvious; every later stage is measured against the metric and "
+            "acceptance bound that stage 1 establishes."
+        ),
     ]
     return "\n".join(lines)
 
 
+def _stage_intro(stage: DesignStage) -> str:
+    """The stage's fixed rationale, plus — where a later stage depends on an earlier one's
+    actual answer — a quote of what was recorded, so the checklist reads against the
+    student's own words instead of restating the method in the abstract."""
+    parts = [STAGE_INTRO[stage]]
+    wired = _WIRED_FROM.get(stage)
+    if wired is not None:
+        source_stage, framing = wired
+        answer = _state.answers.get(source_stage.value)
+        if answer:
+            parts.append(framing.format(answer=answer))
+    if stage is DesignStage.architecture:
+        parts.append(_lesson_block(_state.lesson))
+    return "\n\n".join(parts)
+
+
 def _stage_table(stage: DesignStage) -> str:
-    rows = STAGE_ROWS[stage]
     lines = [
         f"# Stage: {STAGE_TITLE[stage]}",
         "",
-        STAGE_INTRO[stage],
+        _stage_intro(stage),
         "",
         "| Question | Why it matters | A good answer names |",
         "|---|---|---|",
     ]
-    for q, why, names in rows:
+    for q, why, names in _rows(stage):
         lines.append(f"| {q} | {why} | {names} |")
     lines += [
         "",
-        "**How to use this table:** ask the student these questions yourself — together or one "
-        "at a time, your judgement. Do NOT answer them yourself, and do not treat this as done "
-        "until they've engaged in their own words. Once they have, call "
-        f'`vectormesh_design_checklist` again with `stage="{stage.value}"` and '
-        "`answers=<a summary of what they actually said>` to record it and receive the next "
-        "stage.",
+        (
+            "**How to use this table:** ask the student these questions yourself — together or one "
+            "at a time, your judgement. Do NOT answer them yourself, and do not treat this as done "
+            "until they've engaged in their own words. Write no code yet: code comes after the "
+            "last stage. Once they have answered, call "
+            f'`vectormesh_design_checklist` again with `stage="{stage.value}"` and '
+            "`answers=<a summary of what they actually said>` to record it and receive the next "
+            "stage."
+        ),
     ]
     return "\n".join(lines)
 
 
 def _completion_summary() -> str:
     lines = [
-        "# All five stages recorded",
-        "",
-        "What was reasoned through, in order:",
+        "# All eight stages recorded",
         "",
     ]
+    if _state.lesson is not None:
+        lines += [f"Lesson: **{_state.lesson}**", ""]
+    lines += ["What was reasoned through, in order:", ""]
     for stage in STAGE_ORDER:
         lines.append(f"**{STAGE_TITLE[stage]}**")
-        lines.append(f"> {_progress.get(stage.value, '(not recorded)')}")
+        lines.append(f"> {_state.answers.get(stage.value, '(not recorded)')}")
         lines.append("")
     lines += [
-        "The student now has enough to sketch a first version themselves. If the 'flows' or "
-        "'search_space' answers named more than one plausible variant, call "
-        "`vectormesh_search_method` (or run the `search` prompt) next, rather than picking one "
-        "by feel.",
+        (
+            "Now is the right time to write code, if the student wants it: a baseline first, "
+            "built from the components stage 5 offered. If the 'architecture' or 'search_space' "
+            "answers named more than one plausible variant, call `vectormesh_search_method` (or "
+            "run the `search` prompt) next, rather than picking one by feel."
+        ),
     ]
     return "\n".join(lines)
 
@@ -728,15 +1233,15 @@ class DesignChecklistInput(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
-    stage: Optional[DesignStage] = Field(
+    stage: DesignStage | None = Field(
         default=None,
         description=(
             "Which stage to open. Omit on the very first call to get the roadmap and confirm "
-            "where to start (always 'tensors' for a new idea). One of: tensors, enrichments, "
-            "flows, search_space, search_practices."
+            "where to start (always 'problem' for a new idea). One of: problem, tensors, "
+            "pretrained, context, architecture, search_space, search_practices, results."
         ),
     )
-    answers: Optional[str] = Field(
+    answers: str | None = Field(
         default=None,
         description=(
             "A summary, in your own words, of what the student actually said when asked this "
@@ -745,6 +1250,16 @@ class DesignChecklistInput(BaseModel):
             "fabricate this on the student's behalf — it must reflect their real answers."
         ),
         max_length=4000,
+    )
+    lesson: int | None = Field(
+        default=None,
+        description=(
+            "The lesson of the course the student is in (1 to 7), as the student said it. "
+            "Kept with the progress; stage 5 offers only architectures of this lesson or "
+            "earlier. Omit when the student has not said it yet."
+        ),
+        ge=FIRST_LESSON,
+        le=LAST_LESSON,
     )
 
 
@@ -759,48 +1274,60 @@ class DesignChecklistInput(BaseModel):
     },
 )
 async def vectormesh_design_checklist(params: DesignChecklistInput) -> str:
-    """Coach a student through five stages of thinking BEFORE they design anything.
+    """Coach a student through eight stages of thinking BEFORE they design anything.
 
     This is a conversation, not a document dump: each call returns exactly ONE stage's checklist
     table. Ask the student those questions yourself, in the chat, and wait for real answers — do
     not answer on their behalf. Once they've responded, call this tool again with the SAME
     `stage` and their answers summarised in `answers`; that records the stage and returns the
-    next one. Progress is held in memory for this server process only (this session) and is not
-    persisted across restarts.
+    next one. Progress, including the student's lesson, is held in memory for this server
+    process only (this session) and is not persisted across restarts. Code comes after the
+    last stage.
 
-    The five stages, in the order they must happen:
-        1. tensors            — what shape is the data actually in, right now?
-        2. enrichments        — what extra signal could be added before touching architecture?
-        3. flows              — given 1 and 2, which compositions (Serial/Parallel/gating) are
-                                 even on the table?
-        4. search_space       — of the open questions from 1-3, which are worth searching?
-        5. search_practices   — how will a search result be trusted, not just read?
+    The eight stages, in the order they must happen:
+        1. problem            — what is predicted, is deep learning needed, which metric, and
+                                 what score is good enough?
+        2. tensors            — what shape is the data actually in, right now?
+        3. pretrained         — is there a pretrained model, and is the simplest one enough?
+        4. context            — what extra signal could be added before touching architecture?
+        5. architecture       — from the baseline up, which compositions are on the table at
+                                 the student's lesson?
+        6. search_space       — of the open questions, which are worth searching, in what
+                                 budget?
+        7. search_practices   — how will a search result be trusted, not just read?
+        8. results            — how are the runs read in mlflow and shared?
 
     Args:
         params (DesignChecklistInput):
-            - stage (Optional[DesignStage]): which stage to open; omit for the roadmap.
-            - answers (Optional[str]): the student's answers to the CURRENT stage, in your
+            - stage (DesignStage | None): which stage to open; omit for the roadmap.
+            - answers (str | None): the student's answers to the CURRENT stage, in your
               words; omit to just receive the stage's checklist.
+            - lesson (int | None): the student's lesson (1 to 7); kept once given. While it
+              is unknown, the response asks you to ask the student for it.
 
     Returns:
         str: The roadmap (no stage given), a stage's checklist table (stage given, no answers
         yet), or a recorded confirmation plus the next stage's checklist (stage + answers given).
         After the last stage, returns a recap of everything recorded.
     """
+    if params.lesson is not None:
+        _state.lesson = params.lesson
+    ask = _ASK_LESSON if _state.lesson is None else ""
+
     if params.stage is None:
-        return _roadmap()
+        return ask + _roadmap()
 
     stage = params.stage
     if not params.answers or len(params.answers.strip()) < MIN_ANSWER_CHARS:
-        return _stage_table(stage)
+        return ask + _stage_table(stage)
 
-    _progress[stage.value] = params.answers.strip()
+    _state.answers[stage.value] = params.answers.strip()
     nxt = _next_stage(stage)
     if nxt is None:
-        return _completion_summary()
+        return ask + _completion_summary()
 
     recap = f"✅ Recorded for **{STAGE_TITLE[stage]}**: {params.answers.strip()}\n\n"
-    return recap + _stage_table(nxt)
+    return ask + recap + _stage_table(nxt)
 
 
 # --------------------------------------------------------------------------- #
@@ -859,56 +1386,80 @@ async def vectormesh_search_method(params: SearchMethodInput) -> str:
     lines = [
         f"# Searching: {params.idea}",
         "",
-        "Do these in order — reversing the order (e.g. reading results before establishing a "
-        f"baseline) is the most common way a search stops being trustworthy. Full chapter: {url}",
+        (
+            "Do these in order — reversing the order (e.g. reading results before establishing a "
+            f"baseline) is the most common way a search stops being trustworthy. Full chapter: {url}"
+        ),
         "",
-        "1. **Get the no-training floor first.** A cosine-similarity/nearest-centroid "
-        "classifier on the frozen embeddings, no gradient step anywhere. If a trained pipeline "
-        f"can't clear it, the architecture is probably not the problem. ({url}"
-        "#92-the-cheapest-baseline-no-training-at-all)",
+        (
+            "1. **Get the no-training floor first.** A cosine-similarity/nearest-centroid "
+            "classifier on the frozen embeddings, no gradient step anywhere. If a trained pipeline "
+            f"can't clear it, the architecture is probably not the problem. ({url}"
+            "#92-the-cheapest-baseline-no-training-at-all)"
+        ),
         "",
-        "2. **Then a trained baseline, with a seed spread.** Run the simplest plausible "
-        "pipeline over 3-5 seeds *before* writing any search space. Its `std` is the number "
-        f"every later claim gets measured against. ({url}#93-a-trained-baseline-with-a-seed-spread)",
+        (
+            "2. **Then a trained baseline, with a seed spread.** Run the simplest plausible "
+            "pipeline over 3-5 seeds *before* writing any search space. Its `std` is the number "
+            f"every later claim gets measured against. ({url}#93-a-trained-baseline-with-a-seed-spread)"
+        ),
         "",
-        "3. **Design the search space as one dict.** Categorical axes with `tune.choice`, "
-        "continuous ones with `tune.uniform`/`tune.loguniform`. Include any axis that could "
-        "confound the comparison you actually care about (e.g. `lr` and `hidden` alongside "
-        f"`mechanism`, if the question is about `mechanism`). ({url}#94-the-search-space)",
+        (
+            "3. **Design the search space as one dict.** Categorical axes with `tune.choice`, "
+            "continuous ones with `tune.uniform`/`tune.loguniform`. Include any axis that could "
+            "confound the comparison you actually care about (e.g. `lr` and `hidden` alongside "
+            f"`mechanism`, if the question is about `mechanism`). ({url}#94-the-search-space)"
+        ),
         "",
-        "4. **Write the trainable assuming an empty process, with an epoch CEILING plus an "
-        "adaptive stop.** A Ray trial runs in its own process — rebuild the cache load, the "
-        "pipeline, and the optimizer from scratch every call. Set `epochs` generously and let a "
-        "plateau scheduler + patience-based early stop decide the real per-trial budget, so no "
-        f"config is silently under- or over-trained. ({url}#95-the-trainable-function)",
+        (
+            "4. **Write the trainable assuming an empty process, with an epoch CEILING plus an "
+            "adaptive stop.** A Ray trial runs in its own process — rebuild the cache load, the "
+            "pipeline, and the optimizer from scratch every call. Set `epochs` generously and let a "
+            "plateau scheduler + patience-based early stop decide the real per-trial budget, so no "
+            f"config is silently under- or over-trained. ({url}#95-the-trainable-function)"
+        ),
         "",
-        "5. **Read the result one axis at a time**, not just the top row. Group by each axis and "
-        "check whether its groups actually separate before treating that axis's 'best' value as "
-        f"meaningful. ({url}#96-reading-a-search-one-axis-at-a-time)",
+        (
+            "5. **Read the result one axis at a time**, not just the top row. Group by each axis and "
+            "check whether its groups actually separate before treating that axis's 'best' value as "
+            f"meaningful. ({url}#96-reading-a-search-one-axis-at-a-time)"
+        ),
         "",
-        "6. **Turn a difference into a claim by dividing by the baseline's own sigma**, not by "
-        "comparing to zero — and sanity-check against the no-training floor from step 1. Rerun "
-        f"the winning config over several seeds before writing anything down as a conclusion. "
-        f"({url}#97-turning-a-difference-into-a-claim)",
+        (
+            "6. **Turn a difference into a claim by dividing by the baseline's own sigma**, not by "
+            "comparing to zero — and sanity-check against the no-training floor from step 1. Rerun "
+            f"the winning config over several seeds before writing anything down as a conclusion. "
+            f"({url}#97-turning-a-difference-into-a-claim)"
+        ),
         "",
-        "7. **Log once, after `tuner.fit()` returns** — never per-trial if the logging backend "
-        f"uses local sqlite (e.g. mlflow's default); concurrent trial processes will corrupt it. "
-        f"({url}#98-logging-discipline-one-summary-per-search)",
+        (
+            "7. **Log once, after `tuner.fit()` returns** — never per-trial if the logging backend "
+            f"uses local sqlite (e.g. mlflow's default); concurrent trial processes will corrupt it. "
+            f"({url}#98-logging-discipline-one-summary-per-search)"
+        ),
         "",
-        "8. **If launching under `uv run`**, set `RAY_ENABLE_UV_RUN_RUNTIME_ENV=0` before "
-        f"`import ray`, or Ray's workers will look for a `pyproject.toml` in the wrong place. "
-        f"({url}#99-a-uv-run-gotcha-worth-knowing)",
+        (
+            "8. **If launching under `uv run`**, set `RAY_ENABLE_UV_RUN_RUNTIME_ENV=0` before "
+            f"`import ray`, or Ray's workers will look for a `pyproject.toml` in the wrong place. "
+            f"({url}#99-a-uv-run-gotcha-worth-knowing)"
+        ),
         "",
-        "Call `vectormesh_get_concept('09')` for the runnable `trainable()` template — it "
-        "searches over this library's own `Skip -> Gate -> Highway -> MoE` ladder as the "
-        "worked example, including the plateau/early-stop loop from step 4.",
+        (
+            "Call `vectormesh_get_concept('09')` for the runnable `trainable()` template — it "
+            "searches over this library's own `Skip -> Gate -> Highway -> MoE` ladder as the "
+            "worked example, including the plateau/early-stop loop from step 4."
+        ),
     ]
     return "\n".join(lines)
 
 
 @mcp.prompt(
     name="design",
-    description="Start a five-stage design conversation for a new VectorMesh component or architecture.",
+    description=(
+        "Start an eight-stage design conversation (problem, tensors, pretrained, context, "
+        "architecture, search_space, search_practices, results) for a deep learning "
+        "architecture built with VectorMesh."
+    ),
 )
 def design_prompt(idea: str = "a new component or architecture idea") -> str:
     """A one-command design coaching session.
@@ -920,13 +1471,15 @@ def design_prompt(idea: str = "a new component or architecture idea") -> str:
     return (
         f"I want to design {idea} using VectorMesh. Coach me through it as a mentor helping me "
         "think, not as someone writing the code for me.\n\n"
-        "Step 1: call the `vectormesh_design_checklist` tool with no stage to get the roadmap.\n"
-        'Step 2: call it again with `stage="tensors"` and ask me those questions yourself, in '
+        "Step 1: call the `vectormesh_design_checklist` tool with no stage to get the roadmap, "
+        "and ask me which lesson of the course I am in; pass it as `lesson` from then on.\n"
+        'Step 2: call it again with `stage="problem"` and ask me those questions yourself, in '
         "the chat. Wait for my real answers — don't answer for me.\n"
         "Step 3: once I've answered, call the tool again with the same stage and a summary of "
         "what I said in `answers`, to record it and get the next stage. Repeat this for every "
         "stage, in order — never skip ahead, and never fetch two stages before I've answered the "
-        "first.\n"
+        "first. The eight stages are problem, tensors, pretrained, context, architecture, "
+        "search_space, search_practices and results. Write no code before the last one.\n"
         "Step 4: after the last stage, summarise what we worked out together and tell me whether "
         "I should run the `search` prompt next (if there's more than one plausible variant) or "
         "just start building."
