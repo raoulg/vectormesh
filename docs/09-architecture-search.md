@@ -115,11 +115,10 @@ A Ray trial runs in its **own process**. Nothing from your notebook's memory is 
 it — the trainable function must build everything itself, from the cache load down to the
 optimizer.
 
-The trainable below is executed by `tests/test_docs_examples.py` against a tiny synthetic cache
-pair, so it stays in step with the API. `TRAIN_CACHE` and `TEST_CACHE` stand for the two cache
+The block uses the `param_space` from §9.4. `TRAIN_CACHE` and `TEST_CACHE` stand for the two cache
 directories you built (one per split); each item holds `(chunks, dim)` vectors, which is why the
 pipeline starts with an aggregator. A cache with one vector per item drops
-`MaskedMeanAggregator()` and the padder.
+`MaskedMeanAggregator()` and passes `padder=torch.stack`.
 
 The trainable function can use `Trainer` directly rather than hand-rolling the loop: `log_dir` is
 computed but never created on disk unless something actually writes to it, and `progress=False`

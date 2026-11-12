@@ -98,12 +98,12 @@ image path are all covered in [The data layer](docs/03-data-layer.md).
 `RegexVectorizer`, `ChunkedRegexVectorizer`, `DatasetSchema`, `OneHot`, `Collate`,
 `CollateParallel`, `LabelEncoder`.
 
-**Components** — architecture forms (`Serial`, `Parallel`, `Skip`, `Siamese`, `JEPA`), padding (`FixedPadding`,
-`DynamicPadding`), aggregation (`Mean`, `MaskedMean`, `Attention`, `RNN`), neural blocks
-(`NeuralNet`, `Projection`, `Attention`, `TransformerBlock`), connectors (`Concatenate2D`,
-`Concatenate3D`, `ConcatenateSequence`, `Stack2D`), gating (`Gate`, `Highway`, `MoE`, `SparseMoE`), augmentation
-(`GaussianNoise`), metrics in `vectormesh.components.metrics` (`Accuracy`, `F1Score`, `MAE`,
-`MASE`, `RepresentationStd`).
+**Components** — architecture forms (`Serial`, `Parallel`, `Skip`, `Siamese`, `JEPA`), padding
+(`FixedPadding`, `DynamicPadding`), aggregation (`Mean`, `MaskedMean`, `Attention`, `RNN`),
+neural blocks (`NeuralNet`, `Projection`, `Attention`, `TransformerBlock`), connectors
+(`Concatenate2D`, `Concatenate3D`, `ConcatenateSequence`, `Stack2D`), gating (`Gate`, `Highway`,
+`MoE`, `SparseMoE`), augmentation (`GaussianNoise`), metrics in `vectormesh.components.metrics`
+(`Accuracy`, `F1Score`, `MAE`, `MASE`, `RepresentationStd`).
 
 **Training** — `Trainer`, `TrainerSettings`, `EarlyStopping`, and the `Reporter` protocol, from
 `vectormesh.training`.

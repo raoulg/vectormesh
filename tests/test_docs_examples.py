@@ -1,13 +1,21 @@
 """The §9.5 trainable template in docs/09-architecture-search.md runs against the
 current API.
 
-The template is extracted from the markdown and executed on a tiny synthetic cache
-pair. Ray is not a vectormesh dependency, so ``ray`` is replaced by a stub whose
-``tune.report`` records the reported dict: the trainable is called directly with a
-config, which is what a ray worker does inside its own process. Everything that
-touches vectormesh (cache loading, collation, components, ``Trainer``) is real.
+What runs where:
+
+- The template is extracted from the markdown. Everything before the ``tune.Tuner(``
+  call (imports, ``MECHANISMS``, ``trainable``) is executed here, and ``trainable`` is
+  called directly with a config on a tiny synthetic cache pair, the way a ray worker
+  calls it. Ray is not a vectormesh dependency, so in these tests ``ray`` is a stub
+  whose ``tune.report`` records the reported dict; everything that touches vectormesh
+  (cache loading, collation, components, ``Trainer``) is real.
+- The tail from ``tune.Tuner(`` on is not executed there. It is parsed with ``ast`` and
+  the ``tune.*`` names it uses are compared with the expected set.
+- With ``ray`` and ``hyperopt`` installed, one test runs the whole block for real with
+  one sample and one epoch.
 """
 
+import ast
 import json
 import re
 import sys
@@ -87,7 +95,7 @@ def template(tmp_path, reported, monkeypatch) -> dict:
     paths pointed at synthetic caches."""
     code = _section_code("9.5")
     head, sep, _ = code.partition("\ntuner = tune.Tuner(")
-    assert sep, "the §9.5 block no longer ends in a Tuner call"
+    assert sep, "the §9.5 block must end in a tune.Tuner(...) call"
     monkeypatch.chdir(tmp_path)  # the trainable's logdir is relative to the cwd
     namespace: dict = {"__name__": "docs_example"}
     exec(compile(head, str(DOC), "exec"), namespace)  # noqa: S102
@@ -118,3 +126,49 @@ def test_every_searched_mechanism_has_a_builder(template):
     doc_choices = re.search(r'"mechanism": tune.choice\((\[.*?\])\)', DOC.read_text())
     assert doc_choices is not None
     assert set(json.loads(doc_choices.group(1))) == set(template["MECHANISMS"])
+
+
+def test_tuner_tail_uses_the_expected_tune_names():
+    code = _section_code("9.5")
+    _, sep, tail = code.partition("\ntuner = tune.Tuner(")
+    assert sep
+    tree = ast.parse("tuner = tune.Tuner(" + tail)
+    names = {
+        node.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "tune"
+    }
+    assert names == {"Tuner", "TuneConfig", "RunConfig"}
+
+
+@pytest.mark.integration
+def test_whole_block_runs_under_real_ray(tmp_path, monkeypatch):
+    pytest.importorskip("ray")
+    pytest.importorskip("hyperopt")
+    monkeypatch.setenv("RAY_ENABLE_UV_RUN_RUNTIME_ENV", "0")
+    monkeypatch.chdir(tmp_path)
+    _write_cache(tmp_path / "train", n=24, seed=0)
+    _write_cache(tmp_path / "test", n=12, seed=1)
+    code = _section_code("9.5")
+    code = code.replace(
+        'Path("artefacts/my_dataset_train")', repr(str(tmp_path / "train"))
+    )
+    code = code.replace(
+        'Path("artefacts/my_dataset_test")', repr(str(tmp_path / "test"))
+    )
+    code = code.replace("num_samples=24", "num_samples=1")
+    namespace: dict = {
+        "__name__": "docs_example",
+        "param_space": {
+            "mechanism": "plain",
+            "hidden": 16,
+            "lr": 1e-3,
+            "n_experts": 2,
+            "expert_hidden": 16,
+            "epochs": 1,
+        },
+    }
+    exec(compile(code, str(DOC), "exec"), namespace)  # noqa: S102
+    assert namespace["results"].get_dataframe()["accuracy"].notna().all()
