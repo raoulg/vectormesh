@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import Annotated
 
 from fastmcp import FastMCP
+from fastmcp.server.dependencies import get_http_request
 from pydantic import BaseModel, ConfigDict, Field
 
 # --------------------------------------------------------------------------- #
@@ -1105,10 +1106,27 @@ class DesignProgress:
     lesson: int | None = None
 
 
-# In-memory record for THIS server process (i.e. this session). Resets when the server
-# restarts — the design conversation is meant to happen in one sitting, not to persist
-# silently across days.
-_state = DesignProgress()
+# In-memory progress, one per client session, for THIS server process. Resets when the
+# server restarts. An HTTP transport names its sessions (the `mcp-session-id` header), so
+# several clients of one process each get their own progress. Over stdio a process serves a
+# single client and there is no stable session id, so all calls share GLOBAL_SESSION.
+GLOBAL_SESSION = ""
+_sessions: dict[str, DesignProgress] = {}
+
+
+def _session_key() -> str:
+    """The transport's own session id, or GLOBAL_SESSION when it has none."""
+    try:
+        request = get_http_request()
+    except RuntimeError:
+        return GLOBAL_SESSION
+    return request.headers.get("mcp-session-id") or GLOBAL_SESSION
+
+
+def progress_for(key: str) -> DesignProgress:
+    """The progress of one session, created empty on first use."""
+    return _sessions.setdefault(key, DesignProgress())
+
 
 MIN_ANSWER_CHARS = 20
 
@@ -1209,7 +1227,7 @@ def rows_for(stage: DesignStage, lesson: int) -> list[Row]:
     return list(chosen.values())
 
 
-def _roadmap() -> str:
+def _roadmap(state: DesignProgress) -> str:
     lines = [
         "# Designing something new with VectorMesh — an eight-stage conversation",
         "",
@@ -1221,10 +1239,10 @@ def _roadmap() -> str:
         ),
         "",
     ]
-    if _state.lesson is not None:
-        lines += [f"Lesson: **{_state.lesson}**", ""]
+    if state.lesson is not None:
+        lines += [f"Lesson: **{state.lesson}**", ""]
     for stage in STAGE_ORDER:
-        mark = "✅" if stage.value in _state.answers else "▢"
+        mark = "✅" if stage.value in state.answers else "▢"
         lines.append(f"{mark} **{STAGE_TITLE[stage]}** (`{stage.value}`)")
     lines += [
         "",
@@ -1237,7 +1255,7 @@ def _roadmap() -> str:
     return "\n".join(lines)
 
 
-def _stage_intro(stage: DesignStage, lesson: int) -> str:
+def _stage_intro(stage: DesignStage, state: DesignProgress, lesson: int) -> str:
     """The stage's fixed rationale, plus — where a later stage depends on an earlier one's
     actual answer — a quote of what was recorded, so the checklist reads against the
     student's own words instead of restating the method in the abstract."""
@@ -1245,7 +1263,7 @@ def _stage_intro(stage: DesignStage, lesson: int) -> str:
     wired = _WIRED_FROM.get(stage)
     if wired is not None:
         source_stage, framing = wired
-        answer = _state.answers.get(source_stage.value)
+        answer = state.answers.get(source_stage.value)
         if answer:
             parts.append(framing.format(answer=answer))
     if stage is DesignStage.architecture:
@@ -1253,17 +1271,17 @@ def _stage_intro(stage: DesignStage, lesson: int) -> str:
     return "\n\n".join(parts)
 
 
-def _stage_table(stage: DesignStage) -> str:
-    if stage is DesignStage.architecture and _state.lesson is None:
+def _stage_table(stage: DesignStage, state: DesignProgress) -> str:
+    if stage is DesignStage.architecture and state.lesson is None:
         return _ASK_LESSON + (
             "Stage 5 opens once the lesson is known: call `vectormesh_design_checklist` again "
             'with `stage="architecture"` and `lesson=<N>`.'
         )
-    lesson = _effective_lesson(_state.lesson)
+    lesson = _effective_lesson(state.lesson)
     lines = [
         f"# Stage: {STAGE_TITLE[stage]}",
         "",
-        _stage_intro(stage, lesson),
+        _stage_intro(stage, state, lesson),
         "",
         "| Question | Why it matters | A good answer names |",
         "|---|---|---|",
@@ -1285,17 +1303,17 @@ def _stage_table(stage: DesignStage) -> str:
     return "\n".join(lines)
 
 
-def _completion_summary() -> str:
+def _completion_summary(state: DesignProgress) -> str:
     lines = [
         "# All eight stages recorded",
         "",
     ]
-    if _state.lesson is not None:
-        lines += [f"Lesson: **{_state.lesson}**", ""]
+    if state.lesson is not None:
+        lines += [f"Lesson: **{state.lesson}**", ""]
     lines += ["What was reasoned through, in order:", ""]
     for stage in STAGE_ORDER:
         lines.append(f"**{STAGE_TITLE[stage]}**")
-        lines.append(f"> {_state.answers.get(stage.value, '(not recorded)')}")
+        lines.append(f"> {state.answers.get(stage.value, '(not recorded)')}")
         lines.append("")
     lines += [
         (
@@ -1341,6 +1359,13 @@ class DesignChecklistInput(BaseModel):
         ge=FIRST_LESSON,
         le=LAST_LESSON,
     )
+    reset: bool = Field(
+        default=False,
+        description=(
+            "True clears this session's progress (answers and lesson) before the rest of the "
+            "call is handled, to start a new design conversation."
+        ),
+    )
 
 
 @mcp.tool(
@@ -1360,8 +1385,8 @@ async def vectormesh_design_checklist(params: DesignChecklistInput) -> str:
     table. Ask the student those questions yourself, in the chat, and wait for real answers — do
     not answer on their behalf. Once they've responded, call this tool again with the SAME
     `stage` and their answers summarised in `answers`; that records the stage and returns the
-    next one. Progress, including the student's lesson, is held in memory for this server
-    process only (this session) and is not persisted across restarts. Code comes after the
+    next one. Progress, including the student's lesson, is held in memory per client session
+    for this server process only, and is not persisted across restarts. Code comes after the
     last stage.
 
     The eight stages, in the order they must happen:
@@ -1387,33 +1412,48 @@ async def vectormesh_design_checklist(params: DesignChecklistInput) -> str:
             - answers (str | None): the student's answers to the CURRENT stage, in your
               words; omit to just receive the stage's checklist.
             - lesson (int | None): the student's lesson (1 to 7); kept once given. While it
-              is unknown, the response asks you to ask the student for it.
+              is unknown, the response asks you to ask the student for it. A different lesson
+              on a later call replaces it, and the response says so.
+            - reset (bool): True clears this session's progress first.
 
     Returns:
         str: The roadmap (no stage given), a stage's checklist table (stage given, no answers
         yet), or a recorded confirmation plus the next stage's checklist (stage + answers given).
         After the last stage, returns a recap of everything recorded.
     """
+    key = _session_key()
+    notes = ""
+    if params.reset:
+        _sessions[key] = DesignProgress()
+        notes += "Progress cleared: this is a new design conversation.\n\n"
+    state = progress_for(key)
     if params.lesson is not None:
-        _state.lesson = params.lesson
-    ask = _ASK_LESSON if _state.lesson is None else ""
+        if state.lesson is not None and state.lesson != params.lesson:
+            notes += (
+                f"Lesson changed from {state.lesson} to {params.lesson}: the tables from here "
+                f"on are written for lesson {params.lesson}.\n\n"
+            )
+        state.lesson = params.lesson
+    ask = _ASK_LESSON if state.lesson is None else ""
 
     if params.stage is None:
-        return ask + _roadmap()
+        return notes + ask + _roadmap(state)
 
     stage = params.stage
     if not params.answers or len(params.answers.strip()) < MIN_ANSWER_CHARS:
-        table = _stage_table(stage)
-        return table if table.startswith(_ASK_LESSON) else ask + table
+        table = _stage_table(stage, state)
+        return notes + (table if table.startswith(_ASK_LESSON) else ask + table)
 
-    _state.answers[stage.value] = params.answers.strip()
+    state.answers[stage.value] = params.answers.strip()
     nxt = _next_stage(stage)
     if nxt is None:
-        return ask + _completion_summary()
+        return notes + ask + _completion_summary(state)
 
     recap = f"✅ Recorded for **{STAGE_TITLE[stage]}**: {params.answers.strip()}\n\n"
-    table = _stage_table(nxt)
-    return recap + table if table.startswith(_ASK_LESSON) else ask + recap + table
+    table = _stage_table(nxt, state)
+    return notes + (
+        recap + table if table.startswith(_ASK_LESSON) else ask + recap + table
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -1674,7 +1714,7 @@ async def vectormesh_search_method(params: SearchMethodInput) -> str:
             "worked example, including the plateau/early-stop loop from step 4."
         ),
     ]
-    lesson = _state.lesson
+    lesson = progress_for(_session_key()).lesson
     if lesson is None or lesson < GATING_LESSON:
         who = (
             "The student's lesson is not known yet. If it is below lesson "

@@ -39,8 +39,13 @@ mcp_script: Any = _load_script()
 @pytest.fixture(autouse=True)
 def fresh_progress():
     """Every test starts a new design conversation."""
-    mcp_script._state = mcp_script.DesignProgress()
+    mcp_script._sessions.clear()
     yield
+
+
+def state() -> Any:
+    """The progress the in-process client writes to: it has no transport session id."""
+    return mcp_script.progress_for(mcp_script.GLOBAL_SESSION)
 
 
 def call(tool: str, **arguments: Any) -> str:
@@ -89,14 +94,14 @@ def test_row_ids_have_one_text_per_lesson():
 def test_short_answer_does_not_advance():
     text = checklist(stage="problem", answers="too short", lesson=2)
     assert text.startswith("# Stage: 1.")
-    assert "problem" not in mcp_script._state.answers
+    assert "problem" not in state().answers
 
 
 def test_long_answer_advances():
     text = checklist(stage="problem", answers=LONG, lesson=2)
     assert "Recorded for" in text
     assert "# Stage: 2." in text
-    assert mcp_script._state.answers["problem"] == LONG
+    assert state().answers["problem"] == LONG
 
 
 def test_every_table_tells_the_assistant_not_to_answer():
@@ -110,9 +115,9 @@ def test_lesson_is_asked_for_until_given_and_then_kept():
     assert "which lesson" in checklist()
     assert "which lesson" in checklist(stage="problem")
     checklist(stage="problem", answers=LONG, lesson=4)
-    assert mcp_script._state.lesson == 4
+    assert state().lesson == 4
     assert "which lesson" not in checklist(stage="tensors")
-    assert mcp_script._state.lesson == 4
+    assert state().lesson == 4
 
 
 def test_lesson_out_of_range_is_refused():
@@ -349,3 +354,48 @@ def test_stage_7_and_8_agree_on_logging():
 def test_width_row_speaks_of_the_hidden_width():
     for lesson in (1, 3):
         assert "`hidden_size`" in _row("architecture", "width", lesson).question
+
+
+def test_reset_clears_the_progress():
+    checklist(stage="problem", answers=LONG, lesson=3)
+    text = checklist(reset=True)
+    assert "Progress cleared" in text
+    assert state().answers == {}
+    assert state().lesson is None
+
+
+def test_a_changed_lesson_is_accepted_and_announced():
+    checklist(lesson=2)
+    text = checklist(stage="tensors", lesson=4)
+    assert "Lesson changed from 2 to 4" in text
+    assert state().lesson == 4
+    assert "Lesson changed" not in checklist(stage="tensors", lesson=4)
+
+
+class _FakeRequest:
+    def __init__(self, session_id: str) -> None:
+        self.headers = {"mcp-session-id": session_id}
+
+
+def test_two_http_sessions_do_not_see_each_other(monkeypatch):
+    def as_session(session_id: str) -> None:
+        monkeypatch.setattr(
+            mcp_script, "get_http_request", lambda: _FakeRequest(session_id)
+        )
+
+    as_session("alice")
+    checklist(stage="problem", answers=LONG, lesson=2)
+    as_session("bob")
+    assert "which lesson" in checklist()
+    checklist(lesson=5)
+    assert mcp_script.progress_for("alice").answers == {"problem": LONG}
+    assert mcp_script.progress_for("alice").lesson == 2
+    assert mcp_script.progress_for("bob").answers == {}
+    assert mcp_script.progress_for("bob").lesson == 5
+    assert mcp_script.GLOBAL_SESSION not in mcp_script._sessions
+
+
+def test_without_a_transport_session_all_calls_share_one_progress():
+    checklist(lesson=6)
+    assert "which lesson" not in checklist(stage="problem")
+    assert state().lesson == 6
