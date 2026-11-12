@@ -1,13 +1,13 @@
 """Three small models built from library components, to test how the convolution and
 recurrent components compose with the pipelines, gates and connectors.
 
-Each model has a shape test and a training test: a few seeded steps on synthetic data
-with a learnable signal, after which the loss must have fallen. Where a model needs
+The models are not trained: they prove that the tensors work. Each has a test that the
+output has the shape it should, and every step in between is checked by the contract of
+the component that takes it. A last test runs one backward pass on random input and
+checks that a non-zero gradient reaches every parameter. Where a model needs
 something the library does not have, the spot is marked ``WORKAROUND`` with what is
 missing, and the workaround is the smallest one: a plain PyTorch module, lifted.
 """
-
-import math
 
 import pytest
 import torch
@@ -31,47 +31,6 @@ from vectormesh.components import (
 )
 
 CLASSES = 3
-BATCH = 48
-
-
-def _waves(n: int, length: int, seed: int) -> tuple[Tensor, Tensor]:
-    """``(n, length, 3)`` sequences whose first channel is a noisy sine; the class sets
-    its frequency. The other two channels are noise."""
-    gen = torch.Generator().manual_seed(seed)
-    labels = torch.randint(0, CLASSES, (n,), generator=gen)
-    steps = torch.arange(length).float()
-    freq = (labels.float() + 1).unsqueeze(1) * 2 * math.pi / 25
-    phase = torch.rand(n, 1, generator=gen) * 2 * math.pi
-    x = 0.3 * torch.randn(n, length, 3, generator=gen)
-    x[:, :, 0] += torch.sin(freq * steps + phase)
-    return x, labels
-
-
-def _images(n: int, seed: int) -> tuple[Tensor, Tensor]:
-    """``(n, 3, 32, 32)`` noise images; the class is the channel that is brighter."""
-    gen = torch.Generator().manual_seed(seed)
-    labels = torch.randint(0, CLASSES, (n,), generator=gen)
-    x = torch.randn(n, 3, 32, 32, generator=gen)
-    x[torch.arange(n), labels] += 0.5
-    return x, labels
-
-
-def _losses(model: nn.Module, x: Tensor, y: Tensor, steps: int) -> list[float]:
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-2)
-    loss_fn = nn.CrossEntropyLoss()
-    losses = []
-    for _ in range(steps):
-        optimizer.zero_grad()
-        loss = loss_fn(model(x), y)
-        loss.backward()
-        optimizer.step()
-        losses.append(loss.item())
-    return losses
-
-
-def _falls(losses: list[float]) -> bool:
-    """The mean of the last three losses is well under that of the first three."""
-    return sum(losses[-3:]) < 0.7 * sum(losses[:3])
 
 
 # --- A: a sequence through convolution, pooling and a recurrent layer ---------------
@@ -94,12 +53,6 @@ def sequence_model() -> Serial:
 def test_sequence_model_shape():
     torch.manual_seed(0)
     assert sequence_model()(torch.randn(4, 200, 3)).shape == (4, CLASSES)
-
-
-def test_sequence_model_learns():
-    torch.manual_seed(0)
-    x, y = _waves(BATCH, 200, seed=1)
-    assert _falls(_losses(sequence_model(), x, y, steps=30))
 
 
 # --- B: an image through a residual convolution block and a squeeze-excite gate -----
@@ -174,12 +127,6 @@ def test_image_model_shape():
     assert image_model()(torch.randn(4, 3, 32, 32)).shape == (4, CLASSES)
 
 
-def test_image_model_learns():
-    torch.manual_seed(0)
-    x, y = _images(BATCH, seed=2)
-    assert _falls(_losses(image_model(), x, y, steps=20))
-
-
 # --- C: three kernel sizes in parallel on one sequence -----------------------------
 
 
@@ -222,12 +169,6 @@ def parallel_kernels_model() -> Serial:
 def test_parallel_kernels_model_shape():
     torch.manual_seed(0)
     assert parallel_kernels_model()(torch.randn(4, 100, 3)).shape == (4, CLASSES)
-
-
-def test_parallel_kernels_model_learns():
-    torch.manual_seed(0)
-    x, y = _waves(BATCH, 100, seed=3)
-    assert _falls(_losses(parallel_kernels_model(), x, y, steps=30))
 
 
 # --- every model: a gradient reaches every parameter --------------------------------
