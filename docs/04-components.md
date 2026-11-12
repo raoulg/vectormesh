@@ -3,7 +3,8 @@
 Source: `src/vectormesh/components/`. Everything here is an `nn.Module`; most inherit
 `BaseComponent` (`types.py`), which adds nothing but an abstract `forward` returning a tensor.
 A component with a shape contract inherits it from its family in `contracts.py` —
-`RankPolymorphicComponent`, `SequenceComponent`, `BaseAggregator` or `Connector` — so the
+`RankPolymorphicComponent`, `SequenceComponent`, `SlidingComponent`, `ImageComponent`,
+`BaseAggregator` or `Connector` — so the
 class says which rung of the ladder it works on; see
 [§2.6](02-tensor-contracts.md#26-families-the-rung-is-the-class). The architecture forms in
 `pipelines.py` (`Serial`, `Parallel`, `Skip`, `Lift`) have no family: they take the shape of
@@ -90,7 +91,8 @@ become a fixed-size representation.
 | `MeanAggregator()` | none | plain `tensors.mean(dim=1)` — **counts zero-padding into the mean** |
 | `MaskedMeanAggregator()` | none | detects padded chunks (all-zero rows) and excludes them; `clamp(min=1)` guards against an all-padding row |
 | `AttentionAggregator(hidden_size)` | `Linear(D, 1)` | softmax weights over chunks, then weighted sum — learns *which* chunks matter |
-| `RNNAggregator(hidden_size)` | `GRU(D, D)` | runs a GRU over the real chunks (all-zero rows skipped), returns the hidden state after the last one — the only aggregator that is order-sensitive |
+| `RNNAggregator(hidden_size)` | `GRU(D, D)` | runs a GRU over the real chunks (all-zero rows skipped), returns the hidden state after the last one — the only aggregator with parameters that is order-sensitive |
+| `LastAggregator()` | none | the last step, `tensors[:, -1]` — after a `Recurrent`, the state after the whole sequence; padding at the end is read as the last step |
 
 **Choosing one:** if your padder is `FixedPadding`, `MaskedMeanAggregator` is almost always the
 right default — `MeanAggregator` will systematically shrink short documents toward zero.
@@ -197,6 +199,101 @@ none:   x
 One component, four values of one axis, so a search can ask "does normalisation help,
 and which" as `tune.choice(["none", "layer", "batch"])`. Any rank: at `(B, C, D)` the
 batch norm pools every chunk of the batch. Keeps the width.
+
+---
+
+## 4.5c Convolution — `convolution.py`
+
+A window slides along a sequence or over an image. Every component says what shape it will
+return before it runs: `output_length(length)` for a sequence, `output_size(height, width)` for
+an image, the formula PyTorch uses:
+
+```
+out = (length + 2 * padding - dilation * (kernel_size - 1) - 1) // stride + 1
+```
+
+With `stride=1` and an odd kernel, `padding=(kernel_size - 1) // 2 * dilation` keeps the length.
+
+### `Conv1D(in_size, out_size, kernel_size, stride=1, padding=0, dilation=1)`
+
+A `SlidingComponent`: `(B, seq, in_size) -> (B, seq_out, out_size)`. The channels stay on the
+last axis, as everywhere in the library; `Conv1D` moves them to axis 1 for `nn.Conv1d` and back.
+`in_size` is checked at the boundary, so a sequence in PyTorch's `(B, channels, seq)` layout is
+refused rather than convolved along the wrong axis.
+
+```python
+conv = Conv1D(in_size=3, out_size=16, kernel_size=5)
+x = torch.randn(8, 200, 3)  # (B, seq, channels)
+assert conv.output_length(200) == 196
+assert conv(x).shape == (8, 196, 16)
+```
+
+### `Pool1D(kernel_size, kind="max")`
+
+A `SlidingComponent` that keeps the width: each window of `kernel_size` steps becomes one step,
+the maximum (`"max"`) or the mean (`"mean"`) of each channel. A tail shorter than a window is
+dropped.
+
+```python
+pool = Pool1D(4, kind="mean")
+assert pool.output_length(196) == 49
+assert pool(torch.randn(8, 196, 16)).shape == (8, 49, 16)
+```
+
+### `Conv2D(in_size, out_size, kernel_size, stride=1, padding=0, dilation=1)` and `Pool2D(kernel_size, kind="max")`
+
+`ImageComponent`s: `(B, channels, H, W) -> (B, out, H_out, W_out)`, PyTorch's image layout,
+channels second. A square kernel, the same stride, padding and dilation on both axes.
+
+```python
+conv = Conv2D(in_size=3, out_size=8, kernel_size=3, padding=1)
+pool = Pool2D(2)
+image = torch.randn(4, 3, 32, 32)
+assert conv.output_size(32, 32) == (32, 32)
+assert pool.output_size(32, 32) == (16, 16)
+assert pool(conv(image)).shape == (4, 8, 16, 16)
+```
+
+Because the channels are not the last axis, the components that work on the last axis
+(`Gate`, `Norm`, `Skip`, `Projection`) see an image's width there. Go to a vector first.
+
+### `GlobalPool2D(kind="mean")`
+
+`(B, channels, H, W) -> (B, channels)`: each channel averaged (or, with `"max"`, maximised) over
+the whole image. The step from an image to a vector, as an aggregator is the step from a
+sequence to a vector; it belongs to no family.
+
+```python
+head = Serial([Conv2D(3, 8, 3, padding=1), GlobalPool2D(), Projection(8, 10)])
+assert head(torch.randn(4, 3, 32, 32)).shape == (4, 10)
+```
+
+---
+
+## 4.5d Recurrence — `recurrent.py`
+
+### `Recurrent(in_size, hidden_size, kind="gru", n_layers=1)`
+
+A `SequenceComponent`: `(B, seq, in_size) -> (B, seq, hidden_size)`, the state at every step and
+nothing else, so it composes in a `Serial`. `kind` is `"rnn"`, `"gru"` or `"lstm"`; `n_layers`
+stacks layers, and the output is the top one's. Put `LastAggregator` after it for the state
+after the whole sequence.
+
+```python
+model = Serial(
+    [
+        Conv1D(3, 16, kernel_size=5),  # (B, 200, 3) -> (B, 196, 16)
+        Pool1D(4),  # -> (B, 49, 16)
+        Recurrent(16, 32, kind="lstm"),  # -> (B, 49, 32)
+        LastAggregator(),  # -> (B, 32)
+        Projection(32, 5),  # -> (B, 5)
+    ]
+)
+assert model(torch.randn(8, 200, 3)).shape == (8, 5)
+```
+
+Every step is computed, padding included. For padded chunks, `RNNAggregator` runs its GRU
+over the real chunks only.
 
 ---
 

@@ -1,7 +1,8 @@
-"""The §9.5 trainable template in docs/09-architecture-search.md runs against the
-current API.
+"""The examples in the docs run against the current API: the §9.5 trainable template in
+docs/09-architecture-search.md, and the convolution and recurrence examples in
+docs/04-components.md (§4.5c, §4.5d), which are executed whole, their asserts included.
 
-What runs where:
+What runs where for §9.5:
 
 - The template is extracted from the markdown. Everything before the ``tune.Tuner(``
   call (imports, ``MECHANISMS``, ``trainable``) is executed here, and ``trainable`` is
@@ -26,7 +27,9 @@ from pathlib import Path
 import pytest
 from datasets import ClassLabel, Dataset, Features, Sequence, Value
 
-DOC = Path(__file__).parent.parent / "docs" / "09-architecture-search.md"
+DOCS = Path(__file__).parent.parent / "docs"
+DOC = DOCS / "09-architecture-search.md"
+COMPONENTS_DOC = DOCS / "04-components.md"
 DIM = 8
 N_CLASSES = 3
 
@@ -181,3 +184,28 @@ def test_whole_block_runs_under_real_ray(tmp_path, monkeypatch):
         assert namespace["results"].get_dataframe()["accuracy"].notna().all()
     finally:
         ray.shutdown()
+
+
+def _section_blocks(doc: Path, heading: str) -> list[str]:
+    """Every python block in the section whose heading starts with ``## heading``."""
+    text = doc.read_text()
+    start = text.index(f"\n## {heading}")
+    end = text.find("\n## ", start + 1)
+    section = text[start:end] if end != -1 else text[start:]
+    return re.findall(r"```python\n(.*?)```", section, re.DOTALL)
+
+
+@pytest.mark.parametrize("heading", ["4.5c Convolution", "4.5d Recurrence"])
+def test_component_examples_run(heading):
+    import torch
+
+    from vectormesh import components
+
+    blocks = _section_blocks(COMPONENTS_DOC, heading)
+    assert blocks, f"no python block under {heading}"
+    for code in blocks:
+        namespace = {
+            "torch": torch,
+            **{n: getattr(components, n) for n in components.__all__},
+        }
+        exec(compile(code, str(COMPONENTS_DOC), "exec"), namespace)  # noqa: S102

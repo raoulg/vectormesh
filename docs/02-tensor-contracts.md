@@ -108,12 +108,15 @@ it: `Gate` keeps its width, `NeuralNet` names its widths.
 | Family | Takes → gives | Members |
 |---|---|---|
 | `RankPolymorphicComponent` | `(*lead, dim)` → `(*lead, out)` | `NeuralNet`, `Projection`, `Norm`, `Gate`, `Highway`, `MoE`, `SparseMoE`, `GaussianNoise` |
-| `SequenceComponent` | `(batch, seq, dim)` → `(batch, seq, out)` | `Attention`, `TransformerBlock` |
-| `BaseAggregator` | `(batch, _, dim)` → `(batch, dim)` | `MeanAggregator`, `MaskedMeanAggregator`, `AttentionAggregator`, `RNNAggregator` |
+| `SequenceComponent` | `(batch, seq, dim)` → `(batch, seq, out)` | `Attention`, `TransformerBlock`, `Recurrent` |
+| `SlidingComponent` | `(batch, seq, dim)` → `(batch, seq_out, out)` | `Conv1D`, `Pool1D` |
+| `ImageComponent` | `(batch, channels, height, width)` → `(batch, out, height_out, width_out)` | `Conv2D`, `Pool2D` |
+| `BaseAggregator` | `(batch, _, dim)` → `(batch, dim)` | `MeanAggregator`, `MaskedMeanAggregator`, `AttentionAggregator`, `RNNAggregator`, `LastAggregator` |
 | `Connector` | a tuple of branches → one tensor | `Concatenate2D`, `Concatenate3D`, `ConcatenateSequence`, `Stack2D` |
 
 `Serial`, `Parallel`, `Skip` and `Lift` are architecture forms and belong to no family: their
-shape is that of the components they hold. `Skip(Gate(d), d)` works at any rank,
+shape is that of the components they hold. `GlobalPool2D` is in no family either: it is the step
+from an image to a vector, `(batch, channels, height, width)` → `(batch, channels)`. `Skip(Gate(d), d)` works at any rank,
 `Skip(TransformerBlock(d), d)` on sequences only.
 
 The rank-polymorphic family is what lets `NeuralNet` and `Projection` be a head on
@@ -121,6 +124,12 @@ The rank-polymorphic family is what lets `NeuralNet` and `Projection` be a head 
 `Highway` gate every chunk, and lets `MoE` blend experts per chunk on rank-3 input. `*lead`
 binds the leading axes of the input to those of the output, so a member that loses an axis
 fails its own check. The sequence family is rank-locked: attention needs a sequence axis.
+
+The sliding family differs from the sequence family in one name: `seq_out`, because a window
+that slides along the sequence may shorten it. Its members keep the channels on the last axis,
+like every other component, and move them for PyTorch themselves. The image family keeps
+PyTorch's layout instead, channels second, so a component that works on the last axis (`Gate`,
+`Norm`, `Skip`) sees the width of an image there, not its channels.
 
 Vectorizers have families of the same kind, by the rank of one item
 (`vectormesh/data/vectorizers.py`):
