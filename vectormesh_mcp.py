@@ -862,8 +862,9 @@ STAGE_ROWS: dict[DesignStage, list[Row]] = {
         Row(
             "connect",
             "If several: how are vectors of different kinds connected?",
-            "Fusion at document level is the cheapest meeting point and the usual default.",
-            "the connector (e.g. `Parallel` + `Concatenate2D`)",
+            "The meeting point decides which interactions between the streams the model can "
+            "learn, and what that costs.",
+            "the connector by component name, and the level at which the streams meet",
         ),
         Row(
             "fuse_level",
