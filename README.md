@@ -2,7 +2,8 @@
 
 > 🤖 **Use this course from your coding assistant.** These docs, plus a design-from-principles
 > coach and a Ray Tune search coach, are also available as an MCP server, so tools like Claude
-> Code, Cursor, or Claude Desktop can query them directly. See [MCP_SERVER.md](MCP_SERVER.md).
+> Code, Cursor, or Claude Desktop can query them directly: `/vectormesh:design` coaches a design,
+> `/vectormesh:search` a Ray Tune search. See [MCP_SERVER.md](MCP_SERVER.md).
 
 A PyTorch framework for **embed once, reuse many times**.
 
@@ -34,6 +35,14 @@ Full documentation is in **[`docs/`](docs/README.md)**.
 | [Reporters cookbook](docs/10-reporters.md) | mlflow/ray/TensorBoard adapters — none of them a vectormesh dependency |
 
 ## Installation
+
+Using the library in your own project:
+
+```bash
+uv add vectormesh
+```
+
+Working on the library itself, from a clone:
 
 ```bash
 uv sync
@@ -85,14 +94,24 @@ image path are all covered in [The data layer](docs/03-data-layer.md).
 
 ## What's in the box
 
-**Data** — `VectorCache`, `Vectorizer` (chunked text), `ImageVectorizer`, `RegexVectorizer`,
-`ChunkedRegexVectorizer`, `DatasetSchema`, `OneHot`, `Collate`, `CollateParallel`, `LabelEncoder`.
+**Data** — `VectorCache`, `Vectorizer` (chunked text), `ImageVectorizer`, `PatchImageVectorizer`,
+`RegexVectorizer`, `ChunkedRegexVectorizer`, `DatasetSchema`, `OneHot`, `Collate`,
+`CollateParallel`, `LabelEncoder`.
 
-**Components** — architecture forms (`Serial`, `Parallel`, `Skip`), padding (`FixedPadding`,
-`DynamicPadding`), aggregation (`Mean`, `MaskedMean`, `Attention`, `RNN`), neural blocks
-(`NeuralNet`, `Projection`, `Attention`, `TransformerBlock`), connectors (`Concatenate2D`,
-`Concatenate3D`, `ConcatenateSequence`, `Stack2D`), gating (`Gate`, `Highway`, `MoE`, `SparseMoE`), augmentation
-(`GaussianNoise`), metrics (`Accuracy`, `F1Score`, `MAE`, `MASE`).
+**Components** — architecture forms (`Serial`, `Parallel`, `Skip`, `Siamese`, `JEPA`), padding
+(`FixedPadding`, `DynamicPadding`), aggregation (`Mean`, `MaskedMean`, `Attention`, `RNN`),
+neural blocks (`NeuralNet`, `Projection`, `Attention`, `TransformerBlock`), connectors
+(`Concatenate2D`, `Concatenate3D`, `ConcatenateSequence`, `Stack2D`), gating (`Gate`, `Highway`,
+`MoE`, `SparseMoE`), augmentation (`GaussianNoise`), metrics in `vectormesh.components.metrics`
+(`Accuracy`, `F1Score`, `MAE`, `MASE`, `RepresentationStd`).
+
+**Training** — `Trainer`, `TrainerSettings`, `EarlyStopping`, and the `Reporter` protocol, from
+`vectormesh.training`.
+
+**What the library does not hold.** It does not fine-tune the encoder: the cache is the boundary.
+It ships no ray or mlflow helpers either; the integration point is the `Reporter` protocol, with
+copy-paste adapters in [Architecture search](docs/09-architecture-search.md) and the
+[Reporters cookbook](docs/10-reporters.md).
 
 Details and signatures: [Components](docs/04-components.md),
 [API reference](docs/07-api-reference.md).
@@ -173,9 +192,10 @@ uv run ty check
 ```
 src/vectormesh/
 ├── types.py               # VectorMeshError, Cachable, BaseComponent, TensorInput
-├── data/                  # vectorizers, cache, schema, collation
-└── components/            # pipelines, padding, aggregation, neural,
-                           # connectors, gating, augmentation, metrics
+├── data/                  # vectorizers, cache, hub, schema, collation
+├── components/            # pipelines, padding, aggregation, neural,
+│                          # connectors, gating, augmentation, metrics
+└── training/              # Trainer, TrainerSettings, EarlyStopping, Reporter
 docs/                      # documentation (start at docs/README.md)
 notebooks/                 # tutorials, in order
 scripts/                   # batch pipelines

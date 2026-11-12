@@ -115,7 +115,10 @@ real chunks alone. The same caveat applies: put it directly after the padding.
 
 ### `NeuralNet(hidden_size, out_size)`
 
-Two-layer MLP: `Linear(h, h) → GELU → Linear(h, out)`. Annotated `"*lead {self.hidden_size}"`, so
+Feedforward MLP with GELU between every pair of `Linear`s. `hidden_size` is an `int` or a
+`list[int]`. An int `h` gives `Linear(h, h) → GELU → Linear(h, out)`; a list names the whole
+width chain from the input dimension, so `NeuralNet([384, 128], 47)` is
+`Linear(384, 128) → GELU → Linear(128, 47)`. Annotated `"*lead {self.hidden_size}"`, so
 it works both as a classification head on `(B, D)` and as a position-wise transform on
 `(B, C, D)` — which is exactly how it is used as an expert inside `MoE`.
 
@@ -227,9 +230,30 @@ input each chunk gets its own expert mixture. Experts must map `(..., hidden_siz
 > **Note on the paper.** This is the Jacobs & Jordan (1991) *dense* formulation, not the
 > sparsely-gated top-k routing of Shazeer et al. (2017) in `references/`. There is no `top_k`
 > argument, no noisy gating, and no load-balancing loss: every expert is evaluated on every
-> input, so this buys **capacity and specialisation, not compute savings**. Sparse top-k routing
-> is a natural extension exercise — and one that is genuinely hard to make train at this
-> dataset scale.
+> input, so this buys **capacity and specialisation, not compute savings**. Top-k routing is
+> `SparseMoE`, below.
+
+### `SparseMoE(experts, hidden_size, out_size, k=1)`
+
+```
+y = Σ_{i ∈ topk(W x)} softmax(topk logits)_i · expert_i(x)
+```
+
+A **sparse** mixture of experts: the router picks the top-`k` experts per example, each example
+is gathered into only those experts' input batches, and the outputs are scattered back weighted
+by a softmax over just the `k` chosen logits. An expert an example was not routed to never sees
+it, so parameters scale with the number of experts while compute per example scales with `k`.
+`k=1` is Switch-style routing (Fedus et al., 2021); `k>1` blends the top-`k` experts as in
+Shazeer et al. (2017). `k` must satisfy `1 <= k <= len(experts)`, otherwise `VectorMeshError`.
+
+Same interface as `MoE`: any rank (leading dimensions are flattened into one routing axis and
+restored), and experts map `(..., hidden_size)` to `(..., out_size)`. There is no noisy gating and
+no load-balancing loss, so nothing keeps the router from concentrating on a few experts.
+
+```python
+experts = [NeuralNet([hidden_size, 128], hidden_size) for _ in range(8)]
+SparseMoE(experts, hidden_size=hidden_size, out_size=hidden_size, k=2)
+```
 
 ---
 

@@ -1,7 +1,7 @@
 [project]
 name = "vectormesh"
 version = "0.12.0"
-description = "Add your description here"
+description = "A PyTorch framework for embed once, reuse many times."
 readme = "README.md"
 authors = [
     { name = "raoul grouls", email = "Raoul.Grouls@han.nl" }
@@ -10,7 +10,6 @@ requires-python = ">=3.12"
 dependencies = [
     "beartype>=0.22.9",
     "datasets>=4.4.2",
-    "fastmcp>=2.14.2",
     "huggingface-hub>=0.30",
     "jaxtyping>=0.3.4",
     "loguru>=0.7.3",
@@ -27,9 +26,6 @@ dependencies = [
     "tqdm>=4.65.0",
     "transformers>=5.16",
 ]
-
-[project.scripts]
-vectormesh = "vectormesh:main"
 
 [build-system]
 requires = ["hatchling"]
