@@ -280,28 +280,36 @@ as a conclusion. Also weigh the cost: a mechanism that wins by a fraction of a p
 several times the parameters (`sum(p.numel() for p in model.parameters())`) is not obviously
 worth adopting, even if the win is real.
 
-## 9.8 Logging discipline: one summary per search
+## 9.8 Logging discipline: from the driver, one run per trial
 
 Each Ray trial is its own OS process. If your metric-logging backend uses a local sqlite file
 (mlflow's default), concurrent writers from parallel trials will corrupt or block each other. Do
-not log from inside `trainable`. Log **once**, after `tuner.fit()` returns, as a single summary
-row for the whole search:
+not log from inside `trainable`. Log from the driver, after `tuner.fit()` returns: one run per
+trial, with its config as params, so the search can be filtered and drawn (a parallel-coordinates
+plot needs every choice as a param and every outcome as a metric). The baseline and the rerun of
+the winner are runs of their own:
 
 ```python
 import mlflow
 
 mlflow.set_tracking_uri(f"sqlite:///{MLRUNS_PATH}")
 mlflow.set_experiment("architecture-search")
-with mlflow.start_run(run_name="mechanism_search"):
-    mlflow.log_params({"n_trials": len(df)})
+
+with mlflow.start_run(run_name="baseline"):
+    mlflow.set_tag("role", "baseline")
     mlflow.log_metric("no_training_floor", cosine_floor)
-    mlflow.log_metric("baseline_accuracy", baseline.mean())
-    mlflow.log_metric("best_trial_accuracy", float(best["accuracy"]))
-    mlflow.log_param("best_mechanism", best["config/mechanism"])
+    mlflow.log_metric("accuracy", baseline.mean())
+    mlflow.log_metric("accuracy_std", baseline.std())
+
+for i, row in df.iterrows():
+    with mlflow.start_run(run_name=f"trial_{i}"):
+        mlflow.set_tag("role", "trial")
+        mlflow.log_params({k.removeprefix("config/"): v for k, v in row.items() if k.startswith("config/")})
+        mlflow.log_metric("accuracy", float(row["accuracy"]))
+        mlflow.log_metric("train_seconds", float(row["time_total_s"]))
 ```
 
-This is the same "log everything" habit as the rest of the course, applied at the granularity
-that is actually safe: per-search, not per-trial. `mlflow` is not a `vectormesh` dependency —
+One writer, one process: the driver. `mlflow` is not a `vectormesh` dependency —
 this is a plain script-level call, same as every other backend in the
 [reporters cookbook](10-reporters.md).
 

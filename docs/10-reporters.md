@@ -47,9 +47,9 @@ def to_mlflow(epoch, train_loss, test_loss, metric_dict):
 ```
 
 **Inside a ray search**, don't do this per epoch — a ray trial runs in its own process, and
-mlflow's sqlite backend does not want concurrent writers from several trials at once. Log one
-summary row per *search*, after `tuner.fit()` returns, the way
-[§9.8](09-architecture-search.md) does it — not one run per trial.
+mlflow's sqlite backend does not want concurrent writers from several trials at once. Log from
+the driver, after `tuner.fit()` returns, one run per trial, the way
+[§9.8](09-architecture-search.md) does it.
 
 ---
 
