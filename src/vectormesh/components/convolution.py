@@ -22,10 +22,29 @@ PoolKind = Literal["max", "mean"]
 
 
 def _sliding_length(
-    length: int, kernel_size: int, stride: int = 1, padding: int = 0, dilation: int = 1
+    component: str,
+    axis: str,
+    length: int,
+    kernel_size: int,
+    stride: int = 1,
+    padding: int = 0,
+    dilation: int = 1,
 ) -> int:
-    """The number of window positions along one axis, as PyTorch computes it."""
-    return (length + 2 * padding - dilation * (kernel_size - 1) - 1) // stride + 1
+    """The number of window positions along one axis, as PyTorch computes it.
+
+    Raises ``VectorMeshError`` when the window does not fit once: the axis is shorter
+    than the window reaches.
+    """
+    positions = (length + 2 * padding - dilation * (kernel_size - 1) - 1) // stride + 1
+    if positions < 1:
+        raise VectorMeshError(
+            f"{component} gets a {axis} of length {length}, shorter than its window: "
+            f"kernel_size={kernel_size}, dilation={dilation}, padding={padding}, "
+            f"stride={stride} leave {positions} positions",
+            hint="use a smaller kernel_size, more padding, or pool less before this "
+            "component",
+        )
+    return positions
 
 
 def _check_kind(component: str, kind: str) -> None:
@@ -83,13 +102,21 @@ class Conv1D(SlidingComponent):
     def output_length(self, length: int) -> int:
         """The length of the sequence this component returns for one of ``length``."""
         return _sliding_length(
-            length, self.kernel_size, self.stride, self.padding, self.dilation
+            "Conv1D",
+            "seq",
+            length,
+            self.kernel_size,
+            self.stride,
+            self.padding,
+            self.dilation,
         )
 
     @jaxtyped(typechecker=beartype)
     def forward(
         self, tensors: Float[Tensor, "batch seq {self.in_size}"]
     ) -> Float[Tensor, "batch seq_out {self.out_size}"]:
+        # a window that does not fit raises here, naming this component
+        self.output_length(tensors.shape[1])
         return self.conv(tensors.transpose(1, 2)).transpose(1, 2)
 
     def extra_repr(self) -> str:
@@ -125,12 +152,16 @@ class Pool1D(SlidingComponent):
 
     def output_length(self, length: int) -> int:
         """The length of the sequence this component returns for one of ``length``."""
-        return _sliding_length(length, self.kernel_size, stride=self.kernel_size)
+        return _sliding_length(
+            "Pool1D", "seq", length, self.kernel_size, stride=self.kernel_size
+        )
 
     @jaxtyped(typechecker=beartype)
     def forward(
         self, tensors: Float[Tensor, "batch seq dim"]
     ) -> Float[Tensor, "batch seq_out dim"]:
+        # a window that does not fit raises here, naming this component
+        self.output_length(tensors.shape[1])
         return self.pool(tensors.transpose(1, 2)).transpose(1, 2)
 
     def extra_repr(self) -> str:
@@ -183,12 +214,17 @@ class Conv2D(ImageComponent):
     def output_size(self, height: int, width: int) -> tuple[int, int]:
         """The ``(height, width)`` this component returns for an image of that size."""
         args = (self.kernel_size, self.stride, self.padding, self.dilation)
-        return _sliding_length(height, *args), _sliding_length(width, *args)
+        return (
+            _sliding_length("Conv2D", "height", height, *args),
+            _sliding_length("Conv2D", "width", width, *args),
+        )
 
     @jaxtyped(typechecker=beartype)
     def forward(
         self, tensors: Float[Tensor, "batch {self.in_size} height width"]
     ) -> Float[Tensor, "batch {self.out_size} height_out width_out"]:
+        # a window that does not fit raises here, naming this component
+        self.output_size(tensors.shape[2], tensors.shape[3])
         return self.conv(tensors)
 
     def extra_repr(self) -> str:
@@ -223,12 +259,17 @@ class Pool2D(ImageComponent):
     def output_size(self, height: int, width: int) -> tuple[int, int]:
         """The ``(height, width)`` this component returns for an image of that size."""
         k = self.kernel_size
-        return _sliding_length(height, k, stride=k), _sliding_length(width, k, stride=k)
+        return (
+            _sliding_length("Pool2D", "height", height, k, stride=k),
+            _sliding_length("Pool2D", "width", width, k, stride=k),
+        )
 
     @jaxtyped(typechecker=beartype)
     def forward(
         self, tensors: Float[Tensor, "batch channels height width"]
     ) -> Float[Tensor, "batch channels height_out width_out"]:
+        # a window that does not fit raises here, naming this component
+        self.output_size(tensors.shape[2], tensors.shape[3])
         return self.pool(tensors)
 
     def extra_repr(self) -> str:

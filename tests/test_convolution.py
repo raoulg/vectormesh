@@ -15,6 +15,7 @@ from vectormesh.components import (
     ImageComponent,
     Pool1D,
     Pool2D,
+    Serial,
     SlidingComponent,
 )
 from vectormesh.types import VectorMeshError
@@ -111,6 +112,46 @@ def test_global_pool_reduces_each_channel_over_the_image():
     x = torch.randn(2, 3, 5, 7)
     assert torch.allclose(GlobalPool2D()(x), x.mean(dim=(2, 3)))
     assert torch.equal(GlobalPool2D("max")(x), x.flatten(2).amax(-1))
+
+
+def test_conv1d_announces_a_window_that_does_not_fit():
+    """Kernel 3 with dilation 4 reaches over nine steps; eight are too few."""
+    conv = Conv1D(3, 4, 3, dilation=4)
+    assert conv.output_length(9) == 1
+    with pytest.raises(VectorMeshError, match="length 8") as error:
+        conv.output_length(8)
+    for setting in ("kernel_size=3", "dilation=4", "padding=0", "stride=1"):
+        assert setting in str(error.value)
+    assert error.value.hint is not None
+
+
+def test_pool_announces_a_window_that_does_not_fit():
+    with pytest.raises(VectorMeshError, match="Pool1D gets a seq of length 3"):
+        Pool1D(4).output_length(3)
+    with pytest.raises(VectorMeshError, match="Pool2D gets a width of length 3"):
+        Pool2D(4).output_size(8, 3)
+
+
+@pytest.mark.parametrize(
+    ("component", "x"),
+    [
+        (Conv1D(3, 4, 3, dilation=4), torch.randn(2, 8, 3)),
+        (Pool1D(4), torch.randn(2, 3, 3)),
+        (Conv2D(3, 4, 5), torch.randn(2, 3, 4, 8)),
+        (Pool2D(4), torch.randn(2, 3, 8, 3)),
+    ],
+    ids=["Conv1D", "Pool1D", "Conv2D", "Pool2D"],
+)
+def test_forward_refuses_a_window_that_does_not_fit(component, x):
+    with pytest.raises(VectorMeshError, match=type(component).__name__):
+        component(x)
+
+
+def test_too_short_input_is_named_inside_a_pipeline():
+    """The convolution leaves two steps; the error comes from the pool that gets them."""
+    model = Serial([Conv1D(3, 4, 5), Pool1D(4)])
+    with pytest.raises(VectorMeshError, match="Pool1D gets a seq of length 2"):
+        model(torch.randn(2, 6, 3))
 
 
 @pytest.mark.parametrize("component", [Pool1D, Pool2D, GlobalPool2D])
