@@ -722,9 +722,9 @@ STAGE_ROWS: dict[DesignStage, list[StageRow]] = {
                 "decomposition features (FFT magnitude, trend/seasonality, lag or rolling stats)?"
             ),
             (
-                "VectorMesh doesn't ship these out of the box — only `RegexVectorizer` and "
-                "`ImageVectorizer` exist today — so this is a build-it-yourself decision, the same "
-                "shape as an existing `Vectorizer`, not a missing feature to wait for."
+                "The library ships no spectral or decomposition vectorizer. Building one is a "
+                "build-it-yourself decision: write it in the shape of an existing vectorizer, "
+                "so its output lands in a cache like any other."
             ),
             "the specific transform, and the shape it produces per item",
         ),
