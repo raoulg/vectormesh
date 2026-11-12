@@ -399,3 +399,25 @@ def test_without_a_transport_session_all_calls_share_one_progress():
     checklist(lesson=6)
     assert "which lesson" not in checklist(stage="problem")
     assert state().lesson == 6
+
+
+def test_last_stage_returns_the_first_unrecorded_stage():
+    checklist(stage="problem", answers=LONG, lesson=4)
+    checklist(stage="tensors", answers=LONG)
+    text = checklist(stage="results", answers=LONG)
+    assert "All eight stages recorded" not in text
+    assert "# Stage: 3." in text
+    assert "`pretrained`" in text
+    for stage in mcp_script.STAGE_ORDER[2:-1]:
+        checklist(stage=stage.value, answers=LONG)
+    assert checklist(stage="results", answers=LONG).startswith(
+        "# All eight stages recorded"
+    )
+
+
+def test_advance_boundary_is_min_answer_chars():
+    assert mcp_script.MIN_ANSWER_CHARS == 20
+    checklist(stage="problem", answers="x" * 19, lesson=2)
+    assert "problem" not in state().answers
+    checklist(stage="problem", answers="x" * 20)
+    assert state().answers["problem"] == "x" * 20

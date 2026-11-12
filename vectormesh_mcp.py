@@ -1419,7 +1419,8 @@ async def vectormesh_design_checklist(params: DesignChecklistInput) -> str:
     Returns:
         str: The roadmap (no stage given), a stage's checklist table (stage given, no answers
         yet), or a recorded confirmation plus the next stage's checklist (stage + answers given).
-        After the last stage, returns a recap of everything recorded.
+        After the last stage, returns a recap of everything recorded once every stage has an
+        answer; while one is missing, it returns the first unrecorded stage instead.
     """
     key = _session_key()
     notes = ""
@@ -1445,11 +1446,18 @@ async def vectormesh_design_checklist(params: DesignChecklistInput) -> str:
         return notes + (table if table.startswith(_ASK_LESSON) else ask + table)
 
     state.answers[stage.value] = params.answers.strip()
+    recap = f"✅ Recorded for **{STAGE_TITLE[stage]}**: {params.answers.strip()}\n\n"
     nxt = _next_stage(stage)
     if nxt is None:
-        return notes + ask + _completion_summary(state)
+        missing = [s for s in STAGE_ORDER if s.value not in state.answers]
+        if not missing:
+            return notes + ask + _completion_summary(state)
+        nxt = missing[0]
+        recap += (
+            f"**Not finished yet:** {', '.join(f'`{s.value}`' for s in missing)} "
+            "has no recorded answer. Here is the first of them.\n\n"
+        )
 
-    recap = f"✅ Recorded for **{STAGE_TITLE[stage]}**: {params.answers.strip()}\n\n"
     table = _stage_table(nxt, state)
     return notes + (
         recap + table if table.startswith(_ASK_LESSON) else ask + recap + table
