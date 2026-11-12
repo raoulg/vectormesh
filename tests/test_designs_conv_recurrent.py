@@ -62,8 +62,10 @@ class _Residual(nn.Module):
     """``x + block(x)`` on an image.
 
     WORKAROUND: `Skip` normalises and checks the last axis (``"*lead {in_size}"``). On
-    ``(batch, channels, height, width)`` that is the width: ``Skip(block, channels)``
-    is refused, and ``Skip(block, width)`` runs and layer-normalises each row of pixels.
+    ``(batch, channels, height, width)`` that is the width. ``Skip(block, width)`` runs
+    and layer-normalises each row of pixels. ``Skip(block, channels)`` is refused only
+    when the width differs from the channels: on ``(4, 8, 8, 8)`` it runs too, and
+    normalises over the width all the same.
     Missing: a residual whose norm and check can be put on the channel axis, or one
     without a norm.
     """
