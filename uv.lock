@@ -4560,6 +4560,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "fastmcp" },
     { name = "jupyter" },
     { name = "matplotlib" },
     { name = "notebooktester" },
@@ -4594,6 +4595,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "fastmcp", specifier = ">=2.14.2" },
     { name = "jupyter", specifier = ">=1.1.1" },
     { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "notebooktester", specifier = ">=0.2.1" },

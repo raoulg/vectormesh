@@ -43,6 +43,7 @@ include = ["/src", "/tests", "/README.md", "/CHANGELOG.md", "/pyproject.toml"]
 
 [dependency-groups]
 dev = [
+    "fastmcp>=2.14.2",
     "jupyter>=1.1.1",
     "matplotlib>=3.10.8",
     "notebooktester>=0.2.1",
