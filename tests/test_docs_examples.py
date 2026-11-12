@@ -16,6 +16,7 @@ What runs where:
 """
 
 import ast
+import importlib
 import json
 import re
 import sys
@@ -162,7 +163,7 @@ def test_whole_block_runs_under_real_ray(tmp_path, monkeypatch):
     code = code.replace(
         'Path("ray_results").resolve()', repr(str(tmp_path / "ray_results"))
     )
-    tune = ray.tune
+    tune = importlib.import_module("ray.tune")
 
     namespace: dict = {
         "__name__": "docs_example",
