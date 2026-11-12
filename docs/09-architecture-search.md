@@ -115,6 +115,12 @@ A Ray trial runs in its **own process**. Nothing from your notebook's memory is 
 it — the trainable function must build everything itself, from the cache load down to the
 optimizer.
 
+The trainable below is executed by `tests/test_docs_examples.py` against a tiny synthetic cache
+pair, so it stays in step with the API. `TRAIN_CACHE` and `TEST_CACHE` stand for the two cache
+directories you built (one per split); each item holds `(chunks, dim)` vectors, which is why the
+pipeline starts with an aggregator. A cache with one vector per item drops
+`MaskedMeanAggregator()` and the padder.
+
 The trainable function can use `Trainer` directly rather than hand-rolling the loop: `log_dir` is
 computed but never created on disk unless something actually writes to it, and `progress=False`
 drops the `tqdm` bars, which is what makes constructing dozens of `Trainer`s in a row — one per
@@ -130,26 +136,43 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from vectormesh import VectorCache
-from vectormesh.components import Gate, Highway, MaskedMeanAggregator, MoE, NeuralNet, Serial
+from vectormesh.components import (
+    DynamicPadding,
+    Gate,
+    Highway,
+    MaskedMeanAggregator,
+    MoE,
+    NeuralNet,
+    Serial,
+)
 from vectormesh.components.metrics import Accuracy
 from vectormesh.data import Collate, OneHot
 from vectormesh.training import Trainer, TrainerSettings
 
+TRAIN_CACHE = Path("artefacts/my_dataset_train")  # one directory per split
+TEST_CACHE = Path("artefacts/my_dataset_test")
+
+
+def moe(dim: int, cfg: dict) -> MoE:
+    experts = [NeuralNet([dim, cfg["expert_hidden"]], dim) for _ in range(cfg["n_experts"])]
+    return MoE(experts, hidden_size=dim, out_size=dim)
+
+
 MECHANISMS = {
     "plain": lambda dim, cfg: nn.Identity(),
     "gate": lambda dim, cfg: Gate(dim),
-    "highway": lambda dim, cfg: Highway(dim),
-    "moe": lambda dim, cfg: MoE(dim, n_experts=cfg["n_experts"], hidden=cfg["expert_hidden"]),
+    "highway": lambda dim, cfg: Highway(NeuralNet(dim, dim), hidden_size=dim),
+    "moe": moe,
 }
 
 
 def trainable(config: dict) -> None:
-    train = VectorCache.load(path=CACHE_PATH, split="train")
-    test = VectorCache.load(path=CACHE_PATH, split="test")
+    train = VectorCache.load(TRAIN_CACHE)
+    test = VectorCache.load(TEST_CACHE)
     dim, n_classes = train.dim, train.num_classes
 
     oh = OneHot(num_classes=n_classes, label_col="label", target_col="onehot")
-    col = Collate(embedding_col="embed", target_col="onehot")
+    col = Collate(embedding_col="embed", target_col="onehot", padder=DynamicPadding())
     tr = DataLoader(train.dataset.map(oh), batch_size=64, shuffle=True, collate_fn=col)
     te = DataLoader(test.dataset.map(oh), batch_size=64, shuffle=False, collate_fn=col)
 
@@ -157,13 +180,14 @@ def trainable(config: dict) -> None:
     model = Serial([
         MaskedMeanAggregator(),
         mechanism,
-        NeuralNet(dim, config["hidden"], n_classes),
+        NeuralNet([dim, config["hidden"]], n_classes),
     ])
 
     torch.manual_seed(0)
     settings = TrainerSettings(
         epochs=config["epochs"],  # a ceiling -- early stopping below decides the real length
         metrics=[Accuracy()],
+        optimizer_kwargs={"lr": config["lr"]},
         logdir=Path("ray_results/trials").absolute(),  # never created unless save=True fires
         train_steps=len(tr),
         valid_steps=len(te),
