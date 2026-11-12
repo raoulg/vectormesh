@@ -33,6 +33,7 @@ embeddings, no database.
 
 from __future__ import annotations
 
+import math
 import os
 import re
 import urllib.error
@@ -40,6 +41,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from typing import Annotated
 
 from fastmcp import FastMCP
 from pydantic import BaseModel, ConfigDict, Field
@@ -1328,6 +1330,141 @@ async def vectormesh_design_checklist(params: DesignChecklistInput) -> str:
 
     recap = f"✅ Recorded for **{STAGE_TITLE[stage]}**: {params.answers.strip()}\n\n"
     return ask + recap + _stage_table(nxt)
+
+
+# --------------------------------------------------------------------------- #
+# The search budget — how many trials fit, as arithmetic
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True)
+class SearchBudget:
+    """How a time budget divides into rounds of parallel runs.
+
+    One round runs up to `parallel_trials` runs side by side and takes `seconds_per_trial`.
+    The baseline over seeds and the winner's rerun over seeds each take whole rounds; the
+    search gets the rounds that are left.
+    """
+
+    total_rounds: int
+    reserved_rounds: int
+    search_rounds: int
+    trials: int
+    min_budget_minutes: (
+        float  # the smallest budget that leaves room for one search round
+    )
+
+
+def search_budget(
+    seconds_per_trial: float,
+    budget_minutes: float,
+    parallel_trials: int = 1,
+    seeds_for_rerun: int = 3,
+) -> SearchBudget:
+    """Divide a budget into the baseline over seeds, the search, and the winner's rerun."""
+    if seconds_per_trial <= 0 or budget_minutes <= 0:
+        raise ValueError("seconds_per_trial and budget_minutes must be positive")
+    if parallel_trials < 1 or seeds_for_rerun < 1:
+        raise ValueError("parallel_trials and seeds_for_rerun must be at least 1")
+    total_rounds = math.floor(budget_minutes * 60 / seconds_per_trial)
+    rounds_per_seed_set = math.ceil(seeds_for_rerun / parallel_trials)
+    reserved_rounds = 2 * rounds_per_seed_set
+    search_rounds = max(0, total_rounds - reserved_rounds)
+    return SearchBudget(
+        total_rounds=total_rounds,
+        reserved_rounds=reserved_rounds,
+        search_rounds=search_rounds,
+        trials=search_rounds * parallel_trials,
+        min_budget_minutes=(reserved_rounds + 1) * seconds_per_trial / 60,
+    )
+
+
+@mcp.tool(
+    name="vectormesh_search_budget",
+    annotations={
+        "title": "How many search trials fit in a time budget",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def vectormesh_search_budget(
+    seconds_per_trial: Annotated[
+        float, Field(gt=0, description="Wall-clock seconds one training run takes.")
+    ],
+    budget_minutes: Annotated[
+        float, Field(gt=0, description="The whole budget, e.g. 10 or 60 minutes.")
+    ],
+    parallel_trials: Annotated[
+        int, Field(ge=1, le=256, description="How many runs fit side by side.")
+    ] = 1,
+    seeds_for_rerun: Annotated[
+        int,
+        Field(
+            ge=1,
+            le=100,
+            description="Seeds for the baseline, and again for the winner's rerun.",
+        ),
+    ] = 3,
+) -> str:
+    """Return how many search trials fit in a budget, and the trade it leaves.
+
+    The baseline is run over `seeds_for_rerun` seeds before the search and the winner is
+    rerun over as many seeds after it; both are reserved first, in rounds of
+    `parallel_trials` runs, and the search gets what is left. The result ends with the trade
+    between many short trials in a wide scan and fewer long ones, as a question for the
+    student. Use it at the search_space stage of `vectormesh_design_checklist`.
+
+    Args:
+        seconds_per_trial (float): wall-clock seconds one training run takes.
+        budget_minutes (float): the whole budget in minutes.
+        parallel_trials (int): runs that fit side by side (default 1).
+        seeds_for_rerun (int): seeds for the baseline and for the winner's rerun (default 3).
+
+    Returns:
+        str: Markdown with the arithmetic, the number of trials, and the trade as a question.
+    """
+    b = search_budget(
+        seconds_per_trial, budget_minutes, parallel_trials, seeds_for_rerun
+    )
+    lines = [
+        f"# Search budget: {budget_minutes:g} minutes",
+        "",
+        f"- One round: up to {parallel_trials} run(s) side by side, {seconds_per_trial:g} s.",
+        f"- Rounds in the budget: {b.total_rounds}.",
+        (
+            f"- Reserved: {b.reserved_rounds} round(s) — the baseline over {seeds_for_rerun} "
+            f"seed(s) before the search, and the winner's rerun over {seeds_for_rerun} seed(s) "
+            "after it."
+        ),
+        f"- Left for the search: {b.search_rounds} round(s), so **{b.trials} trial(s)**.",
+        "",
+    ]
+    if b.trials == 0:
+        lines.append(
+            "This budget does not leave room for a search after the baseline and the rerun. "
+            f"The smallest budget that does is {b.min_budget_minutes:.1f} minutes; or shorten "
+            "a run, or run more in parallel."
+        )
+        return "\n".join(lines)
+
+    short = search_budget(
+        seconds_per_trial / 2, budget_minutes, parallel_trials, seeds_for_rerun
+    )
+    long = search_budget(
+        seconds_per_trial * 2, budget_minutes, parallel_trials, seeds_for_rerun
+    )
+    lines += [
+        (
+            "**The trade, for the student to decide:** wide and short, or narrow and long? Runs "
+            f"half as long ({seconds_per_trial / 2:g} s) give {short.trials} trials to scan a wide "
+            f"space; runs twice as long ({seconds_per_trial * 2:g} s) give {long.trials} trials "
+            "that each train further. Which does this question need: finding the region where "
+            "good configurations live, or comparing a few candidates within it?"
+        ),
+    ]
+    return "\n".join(lines)
 
 
 # --------------------------------------------------------------------------- #

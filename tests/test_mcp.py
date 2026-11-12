@@ -170,3 +170,53 @@ def test_every_chapter_in_the_reading_order_loads():
     assert mcp_script.CHAPTERS
     for chapter in mcp_script.CHAPTERS:
         assert mcp_script._read_doc(chapter.file).strip()
+
+
+def test_budget_reserves_baseline_and_rerun():
+    # 10 minutes of 30 s runs is 20 rounds; 3 seeds twice, one at a time, reserve 6.
+    b = mcp_script.search_budget(30, 10)
+    assert (b.total_rounds, b.reserved_rounds, b.search_rounds, b.trials) == (
+        20,
+        6,
+        14,
+        14,
+    )
+
+
+def test_budget_with_parallel_trials():
+    # 60 minutes of 60 s runs is 60 rounds of 4; 3 seeds fit in one round, twice.
+    b = mcp_script.search_budget(60, 60, parallel_trials=4, seeds_for_rerun=3)
+    assert (b.total_rounds, b.reserved_rounds, b.search_rounds, b.trials) == (
+        60,
+        2,
+        58,
+        232,
+    )
+
+
+def test_budget_too_small_leaves_no_trials():
+    b = mcp_script.search_budget(120, 10, seeds_for_rerun=5)
+    assert b.trials == 0
+    assert b.min_budget_minutes == pytest.approx(22.0)
+    assert "does not leave room" in call(
+        "vectormesh_search_budget",
+        seconds_per_trial=120,
+        budget_minutes=10,
+        seeds_for_rerun=5,
+    )
+
+
+def test_budget_refuses_impossible_input():
+    with pytest.raises(ValueError):
+        mcp_script.search_budget(0, 10)
+    with pytest.raises(ValueError):
+        mcp_script.search_budget(30, 10, parallel_trials=0)
+
+
+def test_budget_tool_states_the_trade_as_a_question():
+    text = call("vectormesh_search_budget", seconds_per_trial=30, budget_minutes=10)
+    assert "**14 trial(s)**" in text
+    # Half as long: 40 rounds - 6 = 34 trials; twice as long: 10 rounds - 6 = 4 trials.
+    assert "give 34 trials" in text
+    assert "give 4 trials" in text
+    assert text.rstrip().endswith("?")
