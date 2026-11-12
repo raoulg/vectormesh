@@ -1,6 +1,6 @@
 # 7. API reference
 
-Signatures as implemented in `src/vectormesh/` (version 0.3.0). `B` = batch, `C` = chunks,
+Signatures as implemented in `src/vectormesh/` (version 0.12.0). `B` = batch, `C` = chunks,
 `D` = dim.
 
 ---
@@ -247,7 +247,7 @@ Output folder name: `{YYYYMMDDHHMMSS}_{dataset_tag}_{column_name}`.
 | `MaskedMeanAggregator` | `BaseAggregator` | `()` | `(B, _, D)` → `(B, D)` |
 | `AttentionAggregator` | `BaseAggregator` | `(hidden_size: int)` | `(B, _, D)` → `(B, D)` |
 | `RNNAggregator` | `BaseAggregator` | `(hidden_size: int)` | `(B, _, D)` → `(B, D)` |
-| `NeuralNet` | `RankPolymorphicComponent` | `(hidden_size: int, out_size: int)` | `(…, hidden)` → `(…, out)` |
+| `NeuralNet` | `RankPolymorphicComponent` | `(hidden_size: int \| list[int], out_size: int)` | `(…, hidden)` → `(…, out)` |
 | `Projection` | `RankPolymorphicComponent` | `(hidden_size: int, out_size: int)` | `(…, hidden)` → `(…, out)` |
 | `Attention` | `SequenceComponent` | `(hidden_size, num_heads=8, dropout=0.1)` | `(B, seq, D)` → `(B, seq, D)` |
 | `TransformerBlock` | `SequenceComponent` | `(hidden_size, num_heads=8, dropout=0.1)` | `(B, seq, hidden)` → `(B, seq, hidden)`, shape-preserving |
@@ -266,7 +266,9 @@ A `Connector`'s `forward(tensors)` calls `connect(*tensors)`; the shape contract
 `connect`, so every branch is checked.
 
 Note the keyword is `hidden_size` (not `in_size`) for `NeuralNet` and `Projection`; `Skip` is the
-one that takes `in_size`.
+one that takes `in_size`. `NeuralNet(hidden_size=[d, w, …], out_size)` names the whole width chain
+from the input dimension through every hidden layer; a bare `int` means one hidden layer as wide
+as the input.
 
 ---
 
@@ -277,7 +279,7 @@ one that takes `in_size`.
 | `Accuracy` | `()` | `"Accuracy"` |
 | `F1Score` | `(average="micro", threshold=0.5, epsilon=1e-7)` | `"F1-micro"` |
 | `MAE` | `()` | `"MAE"` |
-| `MASE` | `(train: Iterator, horizon: int)` | `"MASE-scale=…"` |
+| `MASE` | `(train: Iterator, horizon: int)` | `"MASE(scale=…)"` |
 
 All are called as `metric(y, yhat)` with `torch.Tensor` or `np.ndarray`, and return `float`.
 

@@ -191,5 +191,5 @@ Four questions run through the whole course, and are worth naming out loud:
 | 4 | Pick one gating mechanism and justify it from the paper in `references/`. |
 | 5 | Build something the notebooks do not contain — chunk-level fusion, `Stack2D` + attention, sparse MoE — and defend the design with an ablation, not a story. |
 
-Throughout: change one thing per run, log to TensorBoard, and quote the cache folder name so the
+Throughout: change one thing per run, log to mlflow (see the [reporters cookbook](10-reporters.md#101-mlflow)), and quote the cache folder name so the
 run is reproducible.
