@@ -16,8 +16,21 @@ from typing import (
 )
 
 import datasets
-from datasets import Dataset, DatasetDict, Features, Sequence, Value, load_from_disk
+import numpy as np
+from datasets import (
+    Array2D,
+    Array3D,
+    Array4D,
+    Array5D,
+    Dataset,
+    DatasetDict,
+    Features,
+    Sequence,
+    Value,
+    load_from_disk,
+)
 from loguru import logger
+from torch import Tensor
 from torch.utils.data import Dataset as TorchDataset
 
 from vectormesh.types import Cachable, VectorMeshError
@@ -32,6 +45,9 @@ from .hub import (
 from .vectorizers import BaseVectorizer
 
 TVectorizer = TypeVar("TVectorizer", bound=BaseVectorizer)
+
+# Features that store every row of a column in one shape, as one block of floats.
+FIXED_SHAPE_FEATURES = (Array2D, Array3D, Array4D, Array5D)
 
 __all__ = ["META_NON_COLUMN_KEYS", "HubUpload", "VectorCache"]
 
@@ -146,11 +162,26 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):  # noqa: P
         map_batch: int,
         remove_columns: list[str] | None,
     ) -> Dataset:
-        """Map the vectorizer over the dataset, reading from vectorizer.input_col."""
+        """Map the vectorizer over the dataset, reading from vectorizer.input_col.
+
+        A column whose target feature is a fixed-shape array (`Array2D`, ...) is
+        handed to `datasets` as numpy arrays, because it does not write torch tensors
+        into such a column; every other column gets the vectorizer's tensors as they are.
+        """
+        fixed = {
+            name: feature
+            for name, feature in features.items()
+            if isinstance(feature, FIXED_SHAPE_FEATURES)
+        }
+
+        def vectorize(batch: dict) -> dict:
+            out = vectorizer(batch[vectorizer.input_col], batchsize=vector_batch)
+            for name in fixed.keys() & out.keys():
+                out[name] = [cls._as_fixed_row(v, name, fixed[name]) for v in out[name]]
+            return out
+
         return dataset.map(
-            lambda batch: vectorizer(
-                batch[vectorizer.input_col], batchsize=vector_batch
-            ),
+            vectorize,
             batched=True,
             batch_size=map_batch,  # Number of documents per batch
             features=features,
@@ -159,6 +190,26 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):  # noqa: P
                 dataset, vectorizer, features, vector_batch, map_batch, remove_columns
             ),
         )
+
+    @staticmethod
+    def _as_fixed_row(vector, column: str, feature) -> np.ndarray:
+        """One vector as a numpy array for a fixed-shape column, checked against its shape.
+
+        `None` in the feature's shape is a free axis, as `datasets` allows for the first.
+        """
+        row = vector.numpy(force=True) if isinstance(vector, Tensor) else vector
+        row = np.asarray(row)
+        wanted = tuple(feature.shape)
+        if len(row.shape) != len(wanted) or any(
+            w is not None and w != got for w, got in zip(wanted, row.shape, strict=True)
+        ):
+            raise VectorMeshError(
+                f"column {column!r} was asked for as {type(feature).__name__} with "
+                f"shape {wanted}, but the vectorizer returned a row of shape "
+                f"{tuple(row.shape)}. A fixed-shape column needs every row in that "
+                "shape; leave features= out for the nested-list default instead."
+            )
+        return row
 
     @staticmethod
     def _map_fingerprint(
@@ -231,13 +282,21 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):  # noqa: P
         on-disk result for an identical (dataset, vectorizer) fingerprint (the whole
         point of `new_fingerprint` above: skip re-embedding, not just re-hashing), and
         a skipped call means a skipped side effect. The rows themselves are correct
-        either way, so counting them directly is correct either way too.
+        either way, so counting them directly is correct either way too. A fixed-shape
+        column states its one row length in its feature, so that count needs no rows.
         """
         from vectormesh import __version__
 
         tensordtype = cls.get_dtensor(vectorizer)
         chunk_sizes = getattr(vectorizer, "chunk_sizes", None)
-        if dataset is not None and tensordtype == 2:
+        feature = features.get(column_name)
+        if (
+            tensordtype == 2
+            and isinstance(feature, FIXED_SHAPE_FEATURES)
+            and feature.shape[0] is not None
+        ):
+            chunk_sizes = Counter({feature.shape[0]: num_observations})
+        elif dataset is not None and tensordtype == 2:
             chunk_sizes = Counter(len(row) for row in dataset[column_name])
 
         return {
