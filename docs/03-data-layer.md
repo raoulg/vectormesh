@@ -398,11 +398,10 @@ describes both. **The vectors are never recomputed.**
 By default a rank-2 column is written as nested lists, `Sequence(Sequence(float32))`: every
 row may have its own number of chunks, and reading a row decodes it list by list. When every
 row has one shape — a heartbeat of `(187, 1)`, a fixed patch grid — ask for a fixed-shape
-column instead, by passing the whole schema with an `Array2D` (or `Array3D`) for the vector
-column:
+column instead, by passing the whole schema with an `Array2D` for the vector column:
 
 ```python
-from datasets import Array2D, Features
+from datasets import Array2D
 
 features = dataset.features.copy()
 features["beat"] = Array2D(shape=(187, 1), dtype="float32")
@@ -420,29 +419,31 @@ cache[0]["beat"].shape                   # torch.Size([187, 1])
 ```
 
 vectormesh never picks this layout for you; without `features=` the column is the nested
-default. `create` hands the vectorizer's tensors to `datasets` as numpy arrays, the form an
-`Array2D` column is written from, and refuses with a `VectorMeshError` a row whose shape is
+default. `create` hands the vectorizer's tensors to `datasets` as numpy arrays in the column's
+dtype (a bfloat16 row lands as float32 in a float32 column), the form an `Array2D` column is
+written from, and refuses with a `VectorMeshError` a row whose shape is
 not the one asked for. `metadata.json` is the same as for the nested layout: `tensordtype`
 2, and `chunk_sizes` holds the one row length, `{"187": rows}`.
 
 It pays when the rows share one shape and are read many times, as in training for many
-epochs. Measured on 100,000 synthetic `(187, 1)` rows (Apple M5 Pro, `datasets` 5.0.1), a
-shuffled `DataLoader` batch of 64 through `Collate`:
+epochs. Measured on 100,000 synthetic `(187, 1)` rows (Apple M5 Pro; Python 3.12.7,
+`datasets` 5.0.1, `pyarrow` 25.0.1, torch 2.13.0), median of five runs: a shuffled
+`DataLoader` batch of 64 over the cache through `Collate`, and one row read at a random
+index:
 
 | layout | per batch of 64 | one row | folder |
 |---|---|---|---|
-| nested lists (default) | 156 ms | 6.0 ms | 151 MB |
-| `Array2D(shape=(187, 1))` | 8.7 ms | 0.13 ms | 151 MB |
+| nested lists (default) | 123 ms | 1.9 ms | 151 MB |
+| `Array2D(shape=(187, 1))` | 6.7 ms | 0.10 ms | 151 MB |
 
 The folder does not shrink: `datasets` stores an `Array2D` column as nested lists too, and
 reads it back as one array because its shape is known. Ragged rows — text chunked into a
 varying number of chunks — cannot take a fixed shape and keep the nested default.
 
 The other paths keep the column as it is: `load`, `from_hub` and `push_to_hub` read and write
-the same schema, `get_or_create` serves a fixed-shape cache it finds on disk (it builds with
-the default schema, so create a fixed-shape cache with `create`), `join` carries the
-`Array2D` feature into the joined cache, and `Collate` batches the `(seq, dim)` rows as it
-batches any other.
+the same schema, `join` carries the `Array2D` feature into the joined cache, and `Collate`
+batches the `(seq, dim)` rows as it batches any other. `get_or_create` builds and finds the
+nested default only: build a fixed-shape cache with `create`, and load it with `load`.
 
 ### Reading a cache
 
