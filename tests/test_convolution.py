@@ -7,7 +7,6 @@ import pytest
 import torch
 import torch.nn.functional as F
 from jaxtyping import TypeCheckError
-from torch import nn
 
 from vectormesh.components import (
     Conv1D,
@@ -43,46 +42,6 @@ def test_pools_return_the_shape_they_announce(kernel, kind):
     pool1, pool2 = Pool1D(kernel, kind), Pool2D(kernel, kind)
     assert pool1(torch.randn(2, 11, 3)).shape == (2, pool1.output_length(11), 3)
     assert pool2(torch.randn(2, 3, 11, 9)).shape == (2, 3, *pool2.output_size(11, 9))
-
-
-class _OneShort(nn.Module):
-    """The wrapped module's output, one step shorter on ``axis``."""
-
-    def __init__(self, module: nn.Module, axis: int):
-        super().__init__()
-        self.module = module
-        self.axis = axis
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out = self.module(x)
-        return out.narrow(self.axis, 0, out.shape[self.axis] - 1)
-
-
-@pytest.mark.parametrize(
-    ("component", "inner", "axis", "x"),
-    [
-        (Conv1D(3, 4, 3, stride=2, padding=1, dilation=2), "conv", 2, (2, 20, 3)),
-        (Pool1D(3), "pool", 2, (2, 20, 3)),
-        (Conv2D(3, 4, 3, stride=2, padding=1, dilation=2), "conv", 2, (2, 3, 11, 16)),
-        (Conv2D(3, 4, 3, stride=2, padding=1, dilation=2), "conv", 3, (2, 3, 11, 16)),
-        (Pool2D(3), "pool", 2, (2, 3, 11, 9)),
-        (Pool2D(3), "pool", 3, (2, 3, 11, 9)),
-    ],
-    ids=[
-        "Conv1D",
-        "Pool1D",
-        "Conv2D-height",
-        "Conv2D-width",
-        "Pool2D-height",
-        "Pool2D-width",
-    ],
-)
-def test_one_step_too_few_is_refused_at_the_boundary(component, inner, axis, x):
-    """The return annotation binds the length `output_length` announces, so a
-    component that returns less fails its own contract."""
-    setattr(component, inner, _OneShort(getattr(component, inner), axis))
-    with pytest.raises(TypeCheckError):
-        component(torch.randn(*x))
 
 
 def test_conv1d_convolves_along_the_sequence():

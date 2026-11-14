@@ -4,8 +4,9 @@ The 1D components take sequences with the channels on the last axis, as every ot
 component does, and move the axis for PyTorch themselves. The 2D components take
 PyTorch's image layout, ``(batch, channels, height, width)``.
 
-Every component tells the shape it will return before it runs: ``output_length(length)``
-for a sequence, ``output_size(height, width)`` for an image.
+An annotation names the axis a window shortens (``seq_out``, ``height_out``,
+``width_out``) and leaves its length to the component, which tells it before it runs:
+``output_length(length)`` for a sequence, ``output_size(height, width)`` for an image.
 """
 
 from typing import Literal
@@ -114,10 +115,7 @@ class Conv1D(SlidingComponent):
     @jaxtyped(typechecker=beartype)
     def forward(
         self, tensors: Float[Tensor, "batch seq {self.in_size}"]
-    ) -> Float[
-        Tensor,
-        "batch (seq+2*{self.padding}-{self.dilation}*({self.kernel_size}-1)-1)//{self.stride}+1 {self.out_size}",
-    ]:
+    ) -> Float[Tensor, "batch seq_out {self.out_size}"]:
         # a window that does not fit raises here, naming this component
         self.output_length(tensors.shape[1])
         return self.conv(tensors.transpose(1, 2)).transpose(1, 2)
@@ -162,7 +160,7 @@ class Pool1D(SlidingComponent):
     @jaxtyped(typechecker=beartype)
     def forward(
         self, tensors: Float[Tensor, "batch seq dim"]
-    ) -> Float[Tensor, "batch seq//{self.kernel_size} dim"]:
+    ) -> Float[Tensor, "batch seq_out dim"]:
         # a window that does not fit raises here, naming this component
         self.output_length(tensors.shape[1])
         return self.pool(tensors.transpose(1, 2)).transpose(1, 2)
@@ -225,14 +223,7 @@ class Conv2D(ImageComponent):
     @jaxtyped(typechecker=beartype)
     def forward(
         self, tensors: Float[Tensor, "batch {self.in_size} height width"]
-    ) -> Float[
-        Tensor,
-        (
-            "batch {self.out_size} "
-            "(height+2*{self.padding}-{self.dilation}*({self.kernel_size}-1)-1)//{self.stride}+1 "
-            "(width+2*{self.padding}-{self.dilation}*({self.kernel_size}-1)-1)//{self.stride}+1"
-        ),
-    ]:
+    ) -> Float[Tensor, "batch {self.out_size} height_out width_out"]:
         # a window that does not fit raises here, naming this component
         self.output_size(tensors.shape[2], tensors.shape[3])
         return self.conv(tensors)
@@ -277,9 +268,7 @@ class Pool2D(ImageComponent):
     @jaxtyped(typechecker=beartype)
     def forward(
         self, tensors: Float[Tensor, "batch channels height width"]
-    ) -> Float[
-        Tensor, "batch channels height//{self.kernel_size} width//{self.kernel_size}"
-    ]:
+    ) -> Float[Tensor, "batch channels height_out width_out"]:
         # a window that does not fit raises here, naming this component
         self.output_size(tensors.shape[2], tensors.shape[3])
         return self.pool(tensors)

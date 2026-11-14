@@ -32,7 +32,7 @@ def forward(self, tensors: Float[Tensor, "batch chunks dim"]) -> Float[Tensor, "
 | `Float[Tensor, "..."]` | any rank at all (used by `Serial` and `Parallel`, which only route) |
 | `Float[Tensor, "*lead dim"]` | rank ≥ 1; `*lead` names the leading axes, so the same name on the return type means *the same leading shape*. `...` does not bind: `"... dim" -> "... dim"` lets a component drop a leading axis unnoticed |
 | `Float[Tensor, "*lead {self.hidden_size}"]` | any leading shape, but the **last** axis must equal this instance's `hidden_size` at runtime |
-| `Float[Tensor, "batch seq//{self.kernel_size} dim"]` | an axis computed from a bound one: the output length must equal the input's `seq` divided by this instance's `kernel_size` (`Pool1D`; the convolutions bind their full length formula the same way) |
+| `Float[Tensor, "batch seq_out {self.out_size}"]` | an axis with a name of its own: a window may shorten the sequence, so the output length is not `seq`. The annotation only names it; the component tells its length, `output_length(length)` (`Conv1D`, `Pool1D`; an image has `height_out` and `width_out`, told by `output_size`) |
 | `Int[Tensor, "batch tokens"]` | integer tensor (token ids, attention masks) |
 | `Float[Tensor, ""]` | rank 0: a scalar tensor, such as a loss or a metric before it becomes a `float` |
 | `Shaped[Tensor, "batch ..."]` | any dtype; for targets that are class indices in one task and float vectors in another |
