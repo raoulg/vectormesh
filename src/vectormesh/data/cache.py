@@ -921,7 +921,13 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):  # noqa: P
                     "both were built from the same source dataset revision."
                 )
 
-        joined = left.add_column(into, list(aligned[column]))
+        # A fixed-shape column keeps its feature; any other is inferred from its values.
+        feature = right.features[column]
+        joined = left.add_column(
+            into,
+            list(aligned[column]),
+            feature=feature if isinstance(feature, FIXED_SHAPE_FEATURES) else None,
+        )
         joined.set_format(type="torch")
 
         metadata = dict(self.metadata)

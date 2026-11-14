@@ -237,6 +237,16 @@ def test_get_or_create_serves_a_fixed_shape_cache(fixed: VectorCache, tmp_path):
     assert hit[0:3]["beat"].shape == (3, STEPS, 1)
 
 
+def test_join_keeps_the_fixed_shape(fixed: VectorCache, steps):
+    joined = fixed.join(fixed, into="beat_again")
+
+    assert joined.features["beat_again"] == fixed.features["beat"]
+    block = joined[0:4]["beat_again"]
+    assert block.shape == (4, STEPS, 1)
+    assert block.dtype == torch.float32
+    assert torch.equal(joined[:]["beat_again"], joined[:]["beat"])
+
+
 def test_hub_round_trip_keeps_the_fixed_shape(
     fixed: VectorCache, tmp_path, monkeypatch
 ):
