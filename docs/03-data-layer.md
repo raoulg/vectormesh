@@ -350,7 +350,7 @@ cannot be joined safely and say so.
 | Step | Method | Notes |
 |---|---|---|
 | resolve output column | `_resolve_column` | explicit `column_name` wins, else `vectorizer.col_name` |
-| build the on-disk schema | `get_features` + `get_dtensor` | rank read from the `__call__` annotation → `Sequence(Value)` for 1D, `Sequence(Sequence(Value))` for 2D |
+| build the on-disk schema | `get_features` + `get_dtensor` | rank read from the `__call__` annotation → `Sequence(Value)` for 1D, `Sequence(Sequence(Value))` for 2D; `features=` replaces it, e.g. with an `Array2D` column |
 | run the model | `_vectorize` | `dataset.map(..., batched=True)`, reading `vectorizer.input_col` |
 | name the map's cache file | `_map_fingerprint` | hashes dataset fingerprint + `vectorizer.fingerprint_fields()` + schema + batch sizes |
 | assemble metadata | `_build_metadata` | version, model tag, vectorizer class, rank, dims, context/stride, chunk histogram |
@@ -392,6 +392,57 @@ updated = VectorCache.create(
 
 The embedding column is carried through untouched; a new column is appended; the metadata now
 describes both. **The vectors are never recomputed.**
+
+### A fixed-shape column — `features=` with `Array2D`
+
+By default a rank-2 column is written as nested lists, `Sequence(Sequence(float32))`: every
+row may have its own number of chunks, and reading a row decodes it list by list. When every
+row has one shape — a heartbeat of `(187, 1)`, a fixed patch grid — ask for a fixed-shape
+column instead, by passing the whole schema with an `Array2D` (or `Array3D`) for the vector
+column:
+
+```python
+from datasets import Array2D, Features
+
+features = dataset.features.copy()
+features["beat"] = Array2D(shape=(187, 1), dtype="float32")
+
+cache = VectorCache.create(
+    cache_dir=Path("artefacts"),
+    vectorizer=raw_vectorizer,           # a ChunkedVectorizer: one (187, 1) tensor per row
+    dataset=dataset,
+    dataset_tag="mitbih_train",
+    features=features,
+    remove_columns=["steps"],            # also dropped from features by create
+)
+cache[0:64]["beat"].shape                # torch.Size([64, 187, 1]), decoded as one block
+cache[0]["beat"].shape                   # torch.Size([187, 1])
+```
+
+vectormesh never picks this layout for you; without `features=` the column is the nested
+default. `create` hands the vectorizer's tensors to `datasets` as numpy arrays, the form an
+`Array2D` column is written from, and refuses with a `VectorMeshError` a row whose shape is
+not the one asked for. `metadata.json` is the same as for the nested layout: `tensordtype`
+2, and `chunk_sizes` holds the one row length, `{"187": rows}`.
+
+It pays when the rows share one shape and are read many times, as in training for many
+epochs. Measured on 100,000 synthetic `(187, 1)` rows (Apple M5 Pro, `datasets` 5.0.1), a
+shuffled `DataLoader` batch of 64 through `Collate`:
+
+| layout | per batch of 64 | one row | folder |
+|---|---|---|---|
+| nested lists (default) | 156 ms | 6.0 ms | 151 MB |
+| `Array2D(shape=(187, 1))` | 8.7 ms | 0.13 ms | 151 MB |
+
+The folder does not shrink: `datasets` stores an `Array2D` column as nested lists too, and
+reads it back as one array because its shape is known. Ragged rows — text chunked into a
+varying number of chunks — cannot take a fixed shape and keep the nested default.
+
+The other paths keep the column as it is: `load`, `from_hub` and `push_to_hub` read and write
+the same schema, `get_or_create` serves a fixed-shape cache it finds on disk (it builds with
+the default schema, so create a fixed-shape cache with `create`), `join` carries the
+`Array2D` feature into the joined cache, and `Collate` batches the `(seq, dim)` rows as it
+batches any other.
 
 ### Reading a cache
 
