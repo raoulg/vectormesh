@@ -17,6 +17,7 @@ from typing import (
 
 import datasets
 import numpy as np
+import torch
 from datasets import (
     Array2D,
     Array3D,
@@ -83,7 +84,7 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):  # noqa: P
             dataset_tag (Optional[str], optional): a tag used to identify preprocessing and versions.
                 This will be used to create a new cache folder cache_dire/dataset_tag_{column_name} inside cache_dir.
                 Will look for existing metadata.json in cache_dir/dataset_tag to extend
-            features (Optional[Features], optional): the features of the provided dataset. Will be handled automatically if not provided. Defaults to None.
+            features (Optional[Features], optional): the features of the provided dataset. Will be handled automatically if not provided. Pass an `Array2D` for the vector column to write it as a fixed-shape column, when every row has one shape. Defaults to None.
             vector_batch (Optional[int], optional): the batchsize of the vectorizer (eg the huggingface model). Defaults to 32.
             map_batch (Optional[int], optional): The batchsize for the mapping over the dataset. Defaults to 32.
             column_name (Optional[str], optional): how to store the output of the vectorizer in the dataset. If not provided, will use vectorizer.col_name. Defaults to None.
@@ -195,10 +196,17 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):  # noqa: P
     def _as_fixed_row(vector, column: str, feature) -> np.ndarray:
         """One vector as a numpy array for a fixed-shape column, checked against its shape.
 
-        `None` in the feature's shape is a free axis, as `datasets` allows for the first.
+        A tensor is cast to the feature's dtype in torch first, so bfloat16, float16
+        and float64 rows all land as that dtype; numpy has no bfloat16. The check
+        accepts `None` on any axis of the feature's shape as a free axis; `datasets`
+        itself allows it only on the first.
         """
-        row = vector.numpy(force=True) if isinstance(vector, Tensor) else vector
-        row = np.asarray(row)
+        if isinstance(vector, Tensor):
+            dtype = getattr(torch, feature.dtype, None)
+            if isinstance(dtype, torch.dtype):
+                vector = vector.to(dtype)
+            vector = vector.numpy(force=True)
+        row = np.asarray(vector)
         wanted = tuple(feature.shape)
         if len(row.shape) != len(wanted) or any(
             w is not None and w != got for w, got in zip(wanted, row.shape, strict=True)
@@ -282,21 +290,13 @@ class VectorCache(Cachable, Generic[TVectorizer], TorchDataset[Any]):  # noqa: P
         on-disk result for an identical (dataset, vectorizer) fingerprint (the whole
         point of `new_fingerprint` above: skip re-embedding, not just re-hashing), and
         a skipped call means a skipped side effect. The rows themselves are correct
-        either way, so counting them directly is correct either way too. A fixed-shape
-        column states its one row length in its feature, so that count needs no rows.
+        either way, so counting them directly is correct either way too.
         """
         from vectormesh import __version__
 
         tensordtype = cls.get_dtensor(vectorizer)
         chunk_sizes = getattr(vectorizer, "chunk_sizes", None)
-        feature = features.get(column_name)
-        if (
-            tensordtype == 2
-            and isinstance(feature, FIXED_SHAPE_FEATURES)
-            and feature.shape[0] is not None
-        ):
-            chunk_sizes = Counter({feature.shape[0]: num_observations})
-        elif dataset is not None and tensordtype == 2:
+        if dataset is not None and tensordtype == 2:
             chunk_sizes = Counter(len(row) for row in dataset[column_name])
 
         return {

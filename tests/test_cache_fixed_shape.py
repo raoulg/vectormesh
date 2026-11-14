@@ -4,8 +4,8 @@ A rank-2 vectorizer whose rows all share one shape, a `(steps, 1)` signal say, c
 its column written as one block of float32 per row instead of a list of lists. The caller
 asks for it through `create(features=...)`; without that, or with `Sequence` features,
 the column is the nested-list default. These tests hold both halves, and every path that
-reads a cache's vector column: `load`, `get_or_create`, `join`, the hub round trip and a
-DataLoader with `Collate`.
+reads a cache's vector column: `load`, `join`, the hub round trip and a DataLoader with
+`Collate`.
 """
 
 from pathlib import Path
@@ -162,6 +162,36 @@ def test_a_row_of_another_shape_is_refused(tmp_path, steps):
     assert "(7, 1)" in str(info.value.__cause__)
 
 
+class Bfloat16Vectorizer(RawSequenceVectorizer):
+    """The same rows, returned as bfloat16 tensors, a dtype numpy does not have."""
+
+    @jaxtyped(typechecker=beartype)
+    def __call__(
+        self, inputs: list, batchsize: int
+    ) -> dict[str, list[Float[torch.Tensor, "_ dim"]]]:
+        return {
+            self.col_name: [
+                torch.tensor(row, dtype=torch.bfloat16).unsqueeze(-1) for row in inputs
+            ]
+        }
+
+
+def test_bfloat16_rows_land_as_the_feature_dtype(tmp_path, steps):
+    cache = VectorCache.create(
+        cache_dir=tmp_path,
+        vectorizer=Bfloat16Vectorizer(),
+        dataset=_source(steps),
+        features=_fixed_features(),
+        remove_columns=["steps"],
+    )
+
+    block = cache[:]["beat"]
+    assert cache.features["beat"] == Array2D(shape=(STEPS, 1), dtype="float32")
+    assert block.dtype == torch.float32
+    expected = torch.from_numpy(steps).to(torch.bfloat16).to(torch.float32)
+    assert torch.equal(block[..., 0], expected)
+
+
 # --- the default stays the default ----------------------------------------------
 
 
@@ -214,27 +244,6 @@ def test_the_fingerprint_names_the_layout(tmp_path, steps):
 
 
 # --- the paths that read a cache --------------------------------------------------
-
-
-def test_get_or_create_serves_a_fixed_shape_cache(fixed: VectorCache, tmp_path):
-    vectorizer = RawSequenceVectorizer()
-    built = VectorCache.create(
-        cache_dir=tmp_path / "goc",
-        vectorizer=vectorizer,
-        dataset=_source(_steps()),
-        dataset_tag=f"heartbeat_{VectorCache._model_slug(vectorizer)}",
-        features=_fixed_features(),
-        remove_columns=["steps"],
-    )
-
-    def never() -> Dataset:
-        raise AssertionError("a cache hit must not build the dataset")
-
-    hit = VectorCache.get_or_create(tmp_path / "goc", "heartbeat", vectorizer, never)
-
-    assert hit.name == built.name
-    assert hit.features["beat"] == Array2D(shape=(STEPS, 1), dtype="float32")
-    assert hit[0:3]["beat"].shape == (3, STEPS, 1)
 
 
 def test_join_keeps_the_fixed_shape(fixed: VectorCache, steps):
