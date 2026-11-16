@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.15.0
+
+### Added
+
+- `vectormesh.design`: `Design`, `option`, `axis_of` and `StageShape`. A design is an
+  `nn.Module` with one typed method per stage, with `Serial`/`Parallel` compositions inside
+  a stage; `@option` marks a stage a search may leave out, and `Design.show` prints the
+  shape after every stage for every combination of the options (docs §5.8).
+
 ## 0.12.0
 
 ### Fixed

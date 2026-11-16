@@ -24,7 +24,7 @@ afternoon.
 | 2 | [Tensor contracts](02-tensor-contracts.md) | Shapes as a type system: jaxtyping + beartype, reading shape errors |
 | 3 | [The data layer](03-data-layer.md) | Vectorizers, `VectorCache`, metadata, publishing a cache to the HuggingFace hub, `DatasetSchema`, `OneHot`/`Collate` |
 | 4 | [Components](04-components.md) | Every building block: padding, aggregation, neural, connectors, convolution, recurrence, gating, augmentation |
-| 5 | [Architectures](05-architectures.md) | Composing the blocks: serial, parallel fusion, skip/highway, MoE, chunk-aligned fusion |
+| 5 | [Architectures](05-architectures.md) | Composing the blocks: serial, parallel fusion, skip/highway, MoE, chunk-aligned fusion, a design as typed stages |
 | 6 | [Training](06-training.md) | Metrics, loss choice, `vectormesh.training.Trainer` wiring, the batch scripts |
 | 7 | [API reference](07-api-reference.md) | Compact signature tables for everything exported |
 | 8 | [Teaching path](08-teaching-path.md) | Notebook-by-notebook course map, the questions each one is meant to provoke |

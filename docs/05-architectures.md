@@ -228,4 +228,128 @@ attributable purely to representation quality.
 | Want specialisation across inputs | `MoE` |
 | Small training set, frozen features | add `GaussianNoise` in front of the head |
 
+---
+
+## 5.8 A design: typed stages around the compositions
+
+A `Serial` states no shapes of its own: it takes them from the components in its list, and
+that list exists only once the code runs. A reader, and a tool that reads code without
+running it, sees `Serial.forward(tensors) -> TensorInput`. A **design** puts the shapes
+back in the text. It is an `nn.Module` with one method per stage, and each stage's
+signature says what it takes and what it gives:
+
+- a tensor you want a shape on gets a name, and a name is a stage boundary;
+- between two names, the components compose as in the sections above (`Serial`,
+  `Parallel`, a connector).
+
+The fusion of §5.2 as a design, with one block a search may leave out: a projection per
+branch before the join.
+
+```python
+from dataclasses import dataclass
+
+import torch
+from beartype import beartype
+from jaxtyping import Float, jaxtyped
+from torch import Tensor, nn
+
+from vectormesh.components import Concatenate2D, NeuralNet, Parallel, Projection
+from vectormesh.design import Design, option
+
+
+@dataclass(frozen=True)
+class Config:
+    shared_dim: int = 32
+    project: bool = False  # a projection per branch before the join
+
+
+class Fusion(nn.Module):
+    projections: Parallel
+
+    def __init__(self, config: Config, dim1: int, dim2: int, n_classes: int) -> None:
+        super().__init__()
+        self.config = config
+        self.dim1, self.dim2, self.n_classes = dim1, dim2, n_classes
+        self.shared_dim = config.shared_dim
+        self.joined_dim = 2 * config.shared_dim if config.project else dim1 + dim2
+        # an optional stage's layers exist only in the subgraph that uses them
+        if config.project:
+            self.projections = Parallel(
+                [Projection(dim1, config.shared_dim), Projection(dim2, config.shared_dim)]
+            )
+        self.concatenate = Concatenate2D()
+        self.head = NeuralNet(hidden_size=self.joined_dim, out_size=n_classes)
+
+    @option("project")
+    @jaxtyped(typechecker=beartype)
+    def project(
+        self,
+        streams: tuple[
+            Float[Tensor, "batch {self.dim1}"], Float[Tensor, "batch {self.dim2}"]
+        ],
+    ) -> tuple[
+        Float[Tensor, "batch {self.shared_dim}"],
+        Float[Tensor, "batch {self.shared_dim}"],
+    ]:
+        return self.projections(streams)
+
+    @jaxtyped(typechecker=beartype)
+    def join(
+        self, streams: tuple[Float[Tensor, "batch _"], Float[Tensor, "batch _"]]
+    ) -> Float[Tensor, "batch {self.joined_dim}"]:
+        return self.concatenate(streams)
+
+    @jaxtyped(typechecker=beartype)
+    def classify(
+        self, joined: Float[Tensor, "batch {self.joined_dim}"]
+    ) -> Float[Tensor, "batch {self.n_classes}"]:
+        return self.head(joined)
+
+    @jaxtyped(typechecker=beartype)
+    def forward(
+        self,
+        streams: tuple[
+            Float[Tensor, "batch {self.dim1}"], Float[Tensor, "batch {self.dim2}"]
+        ],
+    ) -> Float[Tensor, "batch {self.n_classes}"]:
+        if self.config.project:
+            streams = self.project(streams)
+        joined = self.join(streams)
+        return self.classify(joined)
+
+
+DESIGN = Design(Fusion, Config)
+DESIGN.show(
+    lambda chosen: Fusion(DESIGN.drawn(chosen), dim1=384, dim2=512, n_classes=47),
+    (torch.randn(2, 384), torch.randn(2, 512)),  # two rows trace every shape
+)
+```
+
+```
+project=False   (845,871 params)
+  input        (2, 384)
+  join         (2, 896)
+  classify     (2, 47)
+
+project=True   (35,951 params)
+  input        (2, 384)
+  project      (2, 32)
+  join         (2, 64)
+  classify     (2, 47)
+```
+
+What each part is for:
+
+- **`forward` is the whole design**, one line per stage. The model takes the pair a
+  `CollateParallel` loader gives, as a `Serial` would.
+- **`@option("project")`** names the axis of a search space that decides whether the stage
+  is built. `Design.options()` lists those axes, so a search can refuse a space that leaves
+  one out; `Design.drawn(config)` takes the design's choices out of a config that also
+  holds the trainer's (the learning rate, the dataset).
+- **`Design.show`** builds every combination of the options and prints the shape after
+  every stage, for a tuple the shape of its first tensor. `Design.trace` gives the same as
+  data.
+- A choice that is a value, not a stage (a width, which activation, how many layers), is a
+  field of `Config` read in `__init__`, where the stage's `Serial` is built.
+
 Next: [Training](06-training.md).

@@ -307,6 +307,26 @@ All are called as `metric(y, yhat)` with `torch.Tensor` or `np.ndarray`, and ret
 
 ---
 
+## 7.9b Design — `from vectormesh.design import ...`
+
+| Name | Purpose |
+|---|---|
+| `option(axis)` | decorator on a stage (a method of the design's `nn.Module`) the search may leave out; `axis` is the axis of the search space that decides it |
+| `axis_of(stage)` | the axis `option` named on `stage`, or `None` |
+| `Design(module, config)` | the design class and the config dataclass that holds its choices |
+| `Design.options()` | the axis names of the options, in the order the stages are written |
+| `Design.stages()` | the names of the stages: the module's public methods other than `forward` |
+| `Design.choices()` | the field names of the config |
+| `Design.drawn(config)` | the config dataclass built from the design's choices in a drawn config |
+| `Design.combinations()` | every combination of the options, each on or off |
+| `Design.trace(model, example)` | `list[StageShape]`: the stages `model(example)` runs, each with the shape it gives |
+| `Design.show(build, example)` | prints, per combination, the number of params and the shape after every stage |
+| `StageShape(stage, shape)` | pydantic model: one stage a forward pass ran, and the shape it gave |
+
+See [Architectures §5.8](05-architectures.md).
+
+---
+
 ## 7.10 Training — `from vectormesh.training import ...` (also top-level)
 
 ```python
