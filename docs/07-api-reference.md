@@ -35,11 +35,11 @@ BaseAggregator, Connector,
 Serial, Parallel, Skip, Lift, Siamese, JEPA,
 FixedPadding, DynamicPadding,
 MeanAggregator, MaskedMeanAggregator, AttentionAggregator, RNNAggregator, LastAggregator,
-NeuralNet, Projection, Attention, TransformerBlock,
+NeuralNet, Projection, Dense, Attention, TransformerBlock,
 Conv1D, Pool1D, Conv2D, Pool2D, GlobalPool2D, Recurrent,
 Concatenate2D, Concatenate3D, ConcatenateSequence, Stack2D,
 Gate, Highway, MoE, SparseMoE,
-GaussianNoise, Norm, RepresentationStd
+GaussianNoise, Norm, Activation, RepresentationStd
 ```
 
 The first two lines list the families (`components/contracts.py`); every other component with a
@@ -253,6 +253,7 @@ Output folder name: `{YYYYMMDDHHMMSS}_{dataset_tag}_{column_name}`.
 | `LastAggregator` | `BaseAggregator` | `()` | `(B, _, D)` → `(B, D)`, the last step |
 | `NeuralNet` | `RankPolymorphicComponent` | `(hidden_size: int \| list[int], out_size: int)` | `(…, hidden)` → `(…, out)` |
 | `Projection` | `RankPolymorphicComponent` | `(hidden_size: int, out_size: int)` | `(…, hidden)` → `(…, out)` |
+| `Dense` | `RankPolymorphicComponent` | `(in_size: int, out_size: int, norm: 'layer' \| 'batch' \| 'rms' \| 'none' = 'none', activation: 'gelu' \| 'relu' \| 'tanh' \| 'sigmoid' \| 'none' = 'gelu', dropout: float = 0.0)` | `(…, in_size)` → `(…, out_size)`: Linear, Norm, Activation, Dropout |
 | `Attention` | `SequenceComponent` | `(hidden_size, num_heads=8, dropout=0.1)` | `(B, seq, D)` → `(B, seq, D)` |
 | `TransformerBlock` | `SequenceComponent` | `(hidden_size, num_heads=8, dropout=0.1)` | `(B, seq, hidden)` → `(B, seq, hidden)`, shape-preserving |
 | `Recurrent` | `SequenceComponent` | `(in_size: int, hidden_size: int, kind: 'rnn' \| 'gru' \| 'lstm' = 'gru', n_layers: int = 1)` | `(B, seq, in_size)` → `(B, seq, hidden)`, the state at every step |
@@ -265,6 +266,7 @@ Output folder name: `{YYYYMMDDHHMMSS}_{dataset_tag}_{column_name}`.
 | `Concatenate3D` | `Connector` | `()` | `((B, C, D1), …)` → `(B, C, ΣD)` |
 | `ConcatenateSequence` | `Connector` | `()` | `((B, C1, D), …)` → `(B, ΣC, D)` |
 | `Stack2D` | `Connector` | `()` | `((B, D), …)` → `(B, n, D)` |
+| `Activation` | `RankPolymorphicComponent` | `(kind: 'gelu' \| 'relu' \| 'tanh' \| 'sigmoid' \| 'none' = 'gelu')` | `(…, hidden)` → `(…, hidden)`; an unknown kind is a `VectorMeshError` |
 | `Skip` | — (architecture form) | `(transform: nn.Module, in_size: int, projection: nn.Module \| None = None)` | `(…, in_size)` → `(…, out)` |
 | `Norm` | `RankPolymorphicComponent` | `(hidden_size: int, kind: 'layer' \| 'batch' \| 'rms' \| 'none' = 'layer')` | `(…, hidden)` → `(…, hidden)` |
 | `Gate` | `RankPolymorphicComponent` | `(hidden_size: int)` | `(…, hidden)` → `(…, hidden)` |
@@ -320,7 +322,8 @@ All are called as `metric(y, yhat)` with `torch.Tensor` or `np.ndarray`, and ret
 | `Design.drawn(config)` | the config dataclass built from the design's choices in a drawn config |
 | `Design.combinations()` | every combination of the options, each on or off |
 | `Design.trace(model, example)` | `list[StageShape]`: the stages `model(example)` runs, each with the shape it gives |
-| `Design.show(build, example)` | prints, per combination, the number of params and the shape after every stage |
+| `Design.build(config, **widths)` | the module a config chooses: `config` is the config dataclass or a drawn config; `widths` go to the module after its config |
+| `Design.show(example, **widths)` | builds every combination of the options with `build` and prints, per combination, the number of params and the shape after every stage |
 | `StageShape(stage, shape)` | pydantic model: one stage a forward pass ran, and the shape it gave |
 
 See [Architectures §5.8](05-architectures.md).

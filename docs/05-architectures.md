@@ -320,8 +320,10 @@ class Fusion(nn.Module):
 
 DESIGN = Design(Fusion, Config)
 DESIGN.show(
-    lambda chosen: Fusion(DESIGN.drawn(chosen), dim1=384, dim2=512, n_classes=47),
     (torch.randn(2, 384), torch.randn(2, 512)),  # two rows trace every shape
+    dim1=384,
+    dim2=512,
+    n_classes=47,
 )
 ```
 
@@ -346,10 +348,15 @@ What each part is for:
   is built. `Design.options()` lists those axes, so a search can refuse a space that leaves
   one out; `Design.drawn(config)` takes the design's choices out of a config that also
   holds the trainer's (the learning rate, the dataset).
-- **`Design.show`** builds every combination of the options and prints the shape after
-  every stage, for a tuple the shape of its first tensor. `Design.trace` gives the same as
-  data.
+- **`Design.show(example, **widths)`** builds every combination of the options, as
+  `Fusion(config, **widths)`, and prints the shape after every stage, for a tuple the shape
+  of its first tensor. `Design.build(config, **widths)` makes the one module a config
+  chooses (`config` is the dataclass or a config a trial drew); `Design.trace` gives the
+  shapes as data.
 - A choice that is a value, not a stage (a width, which activation, how many layers), is a
-  field of `Config` read in `__init__`, where the stage's `Serial` is built.
+  field of `Config` read in `__init__`, where the stage's `Serial` is built. A hidden layer
+  with such choices is `Dense(in_size, out_size, norm=..., activation=..., dropout=...)`:
+  Linear, `Norm`, `Activation` and Dropout in one component, where `"none"` and `0.0` leave
+  a part out.
 
 Next: [Training](06-training.md).

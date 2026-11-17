@@ -16,8 +16,11 @@ space that decides it. The config a trial draws picks the subgraph that is built
 
     DESIGN = Design(Head, Config)
 
-`Design.combinations` and `Design.trace` build every subgraph and show the shape after
-every stage, which is what `Design.show` prints.
+`Design.build(config, **widths)` makes the module a config chooses; `Design.show(example,
+**widths)` builds every combination of the options and prints the shape after every
+stage.
+
+    DESIGN.show(torch.randn(2, 384), dim=384, n_classes=47)
 """
 
 from __future__ import annotations
@@ -134,11 +137,20 @@ class Design[M: nn.Module, C]:
                 object.__delattr__(model, name)
         return seen
 
-    def show(self, build: Callable[[dict[str, bool]], M], example: TensorInput) -> None:
+    def build(self, config: C | Mapping[str, Choice], **widths: int) -> M:
+        """The module a config chooses. `config` is an instance of the config dataclass
+        or a config a trial drew; `widths` are the sizes the data fixes (`dim`,
+        `n_classes`), which the module takes after its config."""
+        if isinstance(config, Mapping):
+            config = self.drawn(config)
+        return self.module(config, **widths)  # type: ignore[call-arg]
+
+    def show(self, example: TensorInput, **widths: int) -> None:
         """Print, for every combination of the options, its number of params and the
-        shape after every stage. `build(chosen)` makes the model a combination chooses."""
+        shape after every stage. Each combination is built by `build(combination,
+        **widths)`; the choices that are no options keep their defaults."""
         for chosen in self.combinations():
-            model = build(chosen)
+            model = self.build(chosen, **widths)
             n_params = sum(p.numel() for p in model.parameters())
             label = (
                 "  ".join(f"{axis}={on}" for axis, on in chosen.items())

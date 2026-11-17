@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.16.0
+
+### Added
+
+- `Dense(in_size, out_size, norm="none", activation="gelu", dropout=0.0)`: one hidden
+  layer (Linear, Norm, Activation, Dropout), typed `(*lead, in_size) -> (*lead, out_size)`.
+- `Activation(kind)`: `"gelu"`, `"relu"`, `"tanh"`, `"sigmoid"` or `"none"`, chosen by name
+  as `Norm(kind=...)` is; an unknown kind is a `VectorMeshError` that lists the kinds.
+- `Design.build(config, **widths)`: the module a config chooses, from the config dataclass
+  or from a config a trial drew.
+
+### Changed
+
+- `Design.show(example, **widths)` builds every combination of the options itself. The form
+  `Design.show(build, example)` is removed: call `DESIGN.show(example, dim=..., ...)` where
+  it was `DESIGN.show(lambda chosen: Module(DESIGN.drawn(chosen), ...), example)`.
+
 ## 0.15.0
 
 ### Added

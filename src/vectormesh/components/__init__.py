@@ -1,5 +1,6 @@
 """VectorMesh components module."""
 
+from .activation import Activation
 from .aggregation import (
     AttentionAggregator,
     LastAggregator,
@@ -20,7 +21,7 @@ from .contracts import (
 from .convolution import Conv1D, Conv2D, GlobalPool2D, Pool1D, Pool2D
 from .gating import Gate, Highway, MoE, SparseMoE
 from .metrics import RepresentationStd
-from .neural import Attention, NeuralNet, Projection, TransformerBlock
+from .neural import Attention, Dense, NeuralNet, Projection, TransformerBlock
 from .normalization import Norm
 from .padding import DynamicPadding, FixedPadding
 from .pipelines import JEPA, Lift, Parallel, Serial, Siamese, Skip
@@ -28,6 +29,7 @@ from .recurrent import Recurrent
 
 __all__ = [
     "JEPA",
+    "Activation",
     "Attention",
     "AttentionAggregator",
     "BaseAggregator",
@@ -37,6 +39,7 @@ __all__ = [
     "Connector",
     "Conv1D",
     "Conv2D",
+    "Dense",
     "DynamicPadding",
     "FixedPadding",
     "Gate",

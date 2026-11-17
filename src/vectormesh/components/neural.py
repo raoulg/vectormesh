@@ -4,7 +4,9 @@ from beartype import beartype
 from jaxtyping import Bool, Float, jaxtyped
 from torch import Tensor, nn
 
+from vectormesh.components.activation import Activation, ActivationKind
 from vectormesh.components.contracts import RankPolymorphicComponent, SequenceComponent
+from vectormesh.components.normalization import Norm, NormKind
 from vectormesh.types import VectorMeshError
 
 
@@ -83,6 +85,46 @@ class Projection(RankPolymorphicComponent):
         self, tensors: Float[Tensor, "*lead {self.hidden_size}"]
     ) -> Float[Tensor, "*lead {self.out_size}"]:
         return self.proj(tensors)
+
+
+class Dense(RankPolymorphicComponent):
+    """One hidden layer: Linear, Norm, Activation, Dropout.
+
+    ``(*lead, in_size) -> (*lead, out_size)``. The norm, the activation and the dropout
+    are values of their own axes, so a search switches them by name; ``"none"`` and
+    ``0.0`` leave the stage out.
+
+    Args:
+        in_size: width of the last axis in.
+        out_size: width of the last axis out.
+        norm: which normalisation, as for `Norm`.
+        activation: which activation, as for `Activation`.
+        dropout: probability of zeroing a feature while training.
+    """
+
+    def __init__(
+        self,
+        in_size: int,
+        out_size: int,
+        norm: NormKind = "none",
+        activation: ActivationKind = "gelu",
+        dropout: float = 0.0,
+    ):
+        super().__init__()
+        self.in_size = in_size
+        self.out_size = out_size
+        self.layers = nn.Sequential(
+            nn.Linear(in_size, out_size),
+            Norm(out_size, kind=norm),
+            Activation(kind=activation),
+            nn.Dropout(dropout),
+        )
+
+    @jaxtyped(typechecker=beartype)
+    def forward(
+        self, tensors: Float[Tensor, "*lead {self.in_size}"]
+    ) -> Float[Tensor, "*lead {self.out_size}"]:
+        return self.layers(tensors)
 
 
 class Attention(SequenceComponent):

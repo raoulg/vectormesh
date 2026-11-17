@@ -76,6 +76,22 @@ class Fusion(nn.Module):
 DESIGN = Design(Fusion, Config)
 
 
+class WithWidths(nn.Module):
+    def __init__(self, config: Config, dim: int) -> None:
+        super().__init__()
+        self.config, self.dim = config, dim
+        self.layer = nn.Linear(dim, dim)
+
+    @jaxtyped(typechecker=beartype)
+    def forward(
+        self, x: Float[Tensor, "batch {self.dim}"]
+    ) -> Float[Tensor, "batch {self.dim}"]:
+        return self.layer(x)
+
+
+DESIGN_WIDTH = Design(WithWidths, Config)
+
+
 def pair() -> tuple[Tensor, Tensor]:
     return torch.randn(4, A_DIM), torch.randn(4, B_DIM)
 
@@ -118,6 +134,17 @@ def test_trace_gives_the_stages_a_subgraph_runs(chosen):
     assert joined == (4, 16 if chosen["project"] else A_DIM + B_DIM)
 
 
+def test_build_takes_a_config_or_a_drawn_one():
+    assert DESIGN.build(Config(project=True)).config.project
+    drawn = DESIGN.build({"project": True, "shared_dim": 4, "lr": 1e-3})
+    assert drawn.config == Config(shared_dim=4, project=True)
+
+
+def test_build_passes_the_widths_on():
+    assert DESIGN_WIDTH.build(Config(), dim=7).dim == 7
+    DESIGN_WIDTH.show(torch.randn(2, 7), dim=7)
+
+
 def test_trace_leaves_the_model_as_it_found_it():
     model = Fusion(Config(project=True)).train()
     DESIGN.trace(model, pair())
@@ -125,7 +152,7 @@ def test_trace_leaves_the_model_as_it_found_it():
 
 
 def test_show_prints_every_combination(capsys):
-    DESIGN.show(lambda chosen: Fusion(DESIGN.drawn(chosen)), pair())
+    DESIGN.show(pair())
     out = capsys.readouterr().out
     assert "project=False" in out and "project=True" in out
     assert out.count("classify") == 2
