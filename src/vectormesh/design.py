@@ -140,10 +140,10 @@ class Design[M: nn.Module, C]:
     def build(self, config: C | Mapping[str, Choice], **widths: int) -> M:
         """The module a config chooses. `config` is an instance of the config dataclass
         or a config a trial drew; `widths` are the sizes the data fixes (`dim`,
-        `n_classes`), which the module takes after its config."""
+        `n_classes`), passed to the module as keywords after its config."""
         if isinstance(config, Mapping):
             config = self.drawn(config)
-        return self.module(config, **widths)  # type: ignore[call-arg]
+        return self.module(config, **widths)
 
     def show(self, example: TensorInput, **widths: int) -> None:
         """Print, for every combination of the options, its number of params and the

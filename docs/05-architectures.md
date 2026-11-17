@@ -253,13 +253,20 @@ from beartype import beartype
 from jaxtyping import Float, jaxtyped
 from torch import Tensor, nn
 
-from vectormesh.components import Concatenate2D, NeuralNet, Parallel, Projection
+from vectormesh.components import (
+    ActivationKind,
+    Concatenate2D,
+    Dense,
+    NeuralNet,
+    Parallel,
+)
 from vectormesh.design import Design, option
 
 
 @dataclass(frozen=True)
 class Config:
     shared_dim: int = 32
+    activation: ActivationKind = "gelu"  # a field typed `str` fails the check against `Dense`
     project: bool = False  # a projection per branch before the join
 
 
@@ -275,7 +282,10 @@ class Fusion(nn.Module):
         # an optional stage's layers exist only in the subgraph that uses them
         if config.project:
             self.projections = Parallel(
-                [Projection(dim1, config.shared_dim), Projection(dim2, config.shared_dim)]
+                [
+                    Dense(dim1, config.shared_dim, activation=config.activation),
+                    Dense(dim2, config.shared_dim, activation=config.activation),
+                ]
             )
         self.concatenate = Concatenate2D()
         self.head = NeuralNet(hidden_size=self.joined_dim, out_size=n_classes)

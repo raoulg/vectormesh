@@ -129,6 +129,13 @@ it works both as a classification head on `(B, D)` and as a position-wise transf
 A single `Linear`. Same rank polymorphism. Use it to reshape a dimension without adding
 non-linearity — e.g. matching a fused `emb + regex` width down to the model's working width.
 
+### `Dense(in_size, out_size, norm="none", activation="gelu", dropout=0.0)`
+
+One hidden layer: `Linear`, `Norm`, `Activation`, `Dropout`. The norm, the activation and the
+dropout are values of their own axes, so a search switches them by name; with `"none"` or
+`0.0` the part stays in as the identity. Any rank, `(…, in_size) → (…, out_size)`.
+`Serial([Dense(a, b, ...) for a, b in pairwise(widths)])` is a block of any depth.
+
 ### `Attention(hidden_size, num_heads=8, dropout=0.1)`
 
 Bare multi-head self-attention on `(B, seq, D)`, no residual, no norm, no padding mask. A
@@ -199,6 +206,16 @@ none:   x
 One component, four values of one axis, so a search can ask "does normalisation help,
 and which" as `tune.choice(["none", "layer", "batch"])`. Any rank: at `(B, C, D)` the
 batch norm pools every chunk of the batch. Keeps the width.
+
+### `Activation(kind="gelu")`
+
+```
+gelu, relu, tanh, sigmoid:  the elementwise function of that name
+none:                       x
+```
+
+The same shape as `Norm`: one component, values of one axis, any rank, the width kept. An
+unknown kind is a `VectorMeshError` that lists the kinds.
 
 ---
 

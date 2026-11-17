@@ -42,6 +42,9 @@ Gate, Highway, MoE, SparseMoE,
 GaussianNoise, Norm, Activation, RepresentationStd
 ```
 
+The names a component takes by `kind` are types of their own: `NormKind` and `ActivationKind`
+(`Literal` types), for the field of a config that holds the choice.
+
 The first two lines list the families (`components/contracts.py`); every other component with a
 shape contract is a member of one, except `GlobalPool2D`, the step from an image to a vector —
 see [§7.7](#77-components).
@@ -266,9 +269,9 @@ Output folder name: `{YYYYMMDDHHMMSS}_{dataset_tag}_{column_name}`.
 | `Concatenate3D` | `Connector` | `()` | `((B, C, D1), …)` → `(B, C, ΣD)` |
 | `ConcatenateSequence` | `Connector` | `()` | `((B, C1, D), …)` → `(B, ΣC, D)` |
 | `Stack2D` | `Connector` | `()` | `((B, D), …)` → `(B, n, D)` |
-| `Activation` | `RankPolymorphicComponent` | `(kind: 'gelu' \| 'relu' \| 'tanh' \| 'sigmoid' \| 'none' = 'gelu')` | `(…, hidden)` → `(…, hidden)`; an unknown kind is a `VectorMeshError` |
 | `Skip` | — (architecture form) | `(transform: nn.Module, in_size: int, projection: nn.Module \| None = None)` | `(…, in_size)` → `(…, out)` |
 | `Norm` | `RankPolymorphicComponent` | `(hidden_size: int, kind: 'layer' \| 'batch' \| 'rms' \| 'none' = 'layer')` | `(…, hidden)` → `(…, hidden)` |
+| `Activation` | `RankPolymorphicComponent` | `(kind: 'gelu' \| 'relu' \| 'tanh' \| 'sigmoid' \| 'none' = 'gelu')` | `(…, hidden)` → `(…, hidden)`; an unknown kind is a `VectorMeshError` |
 | `Gate` | `RankPolymorphicComponent` | `(hidden_size: int)` | `(…, hidden)` → `(…, hidden)` |
 | `Highway` | `RankPolymorphicComponent` | `(transform: nn.Module, hidden_size: int)` | `(…, hidden)` → `(…, hidden)` |
 | `MoE` | `RankPolymorphicComponent` | `(experts: list[nn.Module], hidden_size: int, out_size: int)` | `(…, hidden)` → `(…, out)` |

@@ -126,7 +126,7 @@ family (`components/contracts.py`) says which:
 
 | What it does to the rank | In → out | Components | Family |
 |---|---|---|---|
-| keeps it, any rank (works on the last axis) | `(*lead, D) → (*lead, D')` | `NeuralNet`, `Projection`, `Gate`, `Highway`, `MoE`, `SparseMoE`, `GaussianNoise` | `RankPolymorphicComponent` |
+| keeps it, any rank (works on the last axis) | `(*lead, D) → (*lead, D')` | `NeuralNet`, `Projection`, `Dense`, `Norm`, `Activation`, `Gate`, `Highway`, `MoE`, `SparseMoE`, `GaussianNoise` | `RankPolymorphicComponent` |
 | keeps it, 3D only | `(B, C, D) → (B, C, D')` | `Attention`, `TransformerBlock`, `Recurrent` | `SequenceComponent` |
 | keeps it, 3D only; a window may shorten the sequence | `(B, C, D) → (B, C', D')` | `Conv1D`, `Pool1D` | `SlidingComponent` |
 | keeps it, 4D only | `(B, channels, H, W) → (B, channels', H', W')` | `Conv2D`, `Pool2D` | `ImageComponent` |

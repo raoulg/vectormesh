@@ -91,8 +91,8 @@ class Dense(RankPolymorphicComponent):
     """One hidden layer: Linear, Norm, Activation, Dropout.
 
     ``(*lead, in_size) -> (*lead, out_size)``. The norm, the activation and the dropout
-    are values of their own axes, so a search switches them by name; ``"none"`` and
-    ``0.0`` leave the stage out.
+    are values of their own axes, so a search switches them by name; with ``"none"`` or
+    ``0.0`` the part stays in as the identity.
 
     Args:
         in_size: width of the last axis in.

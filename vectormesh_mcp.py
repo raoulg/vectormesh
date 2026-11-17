@@ -474,6 +474,8 @@ LESSONS: dict[int, dict[str, tuple[str, ...]]] = {
             "Projection",
             "GaussianNoise",
             "Norm",
+            "Dense",
+            "Activation",
         ),
         "ideas": (
             "linear and MLP heads on frozen pretrained image encoders (caches)",
