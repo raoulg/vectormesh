@@ -62,15 +62,23 @@ trainer = Trainer(
     scheduler=optim.lr_scheduler.ReduceLROnPlateau,
     device=detect_device(),
 )
-result = trainer.loop()  # TrainResult(epoch, train_loss, test_loss, metric_dict)
+result = trainer.loop()  # TrainResult(epoch, train_loss, test_loss, metric_dict, stopped_epoch)
 ```
 
 `detect_device()` (from `vectormesh.data.vectorizers`) returns `cuda` → `mps` → `cpu` in order of
 availability. For a head this small, `cpu` is often competitive — the data is already vectors.
 
-`trainer.loop()` returns a `TrainResult` with the final epoch's `train_loss`, `test_loss` and
-`metric_dict`, which is what lets a ray trial call `Trainer` directly and read its result off the
-return value; see [§9](09-architecture-search.md).
+`trainer.loop()` returns a `TrainResult` with the `epoch`, `train_loss`, `test_loss` and
+`metric_dict` of the model that `trainer.model` holds afterwards, which is what lets a ray trial
+call `Trainer` directly and read its result off the return value; see
+[§9](09-architecture-search.md). Without early stopping that is the last epoch. With early
+stopping it is the epoch with the lowest validation loss: its weights are copied in memory at every
+improvement and put back into `trainer.model` when the loop ends, also with `save=False`.
+`result.stopped_epoch` is the last epoch that ran, so a notebook can report both:
+
+```python
+print(f"best epoch {result.epoch} of {result.stopped_epoch}: {result.metric_dict}")
+```
 
 ---
 
@@ -118,7 +126,9 @@ settings = TrainerSettings(
 - `train_steps` / `valid_steps` — batches per epoch; use `len(loader)` for a full pass.
 - `earlystop_kwargs` — **required, no default.** Pass `None` to train the full epoch count, or a
   dict of `EarlyStopping` kwargs. Whether a run stops early changes the number you report,
-  non-obviously enough that `TrainerSettings` won't let you leave it unstated. Patience must exceed
+  non-obviously enough that `TrainerSettings` won't let you leave it unstated. With early stopping
+  on, `loop()` ends on the best epoch's weights and reports that epoch (§6.1); `save=True` also
+  writes every improvement to `log_dir / "checkpoint.pt"`. Patience must exceed
   the scheduler's patience, or you stop before the reduced learning rate has a chance to help — the
   scripts use 40 vs 20.
 - `scheduler_kwargs` — only used if `Trainer(..., scheduler=...)` is also passed; defaults to

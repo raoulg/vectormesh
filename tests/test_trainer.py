@@ -32,15 +32,15 @@ def _dataloaders(
 
 def _settings(tmp_path, **overrides: Any) -> TrainerSettings:
     train_dl, valid_dl = _dataloaders()
-    kwargs: dict[str, Any] = dict(
-        epochs=2,
-        metrics=[],
-        logdir=tmp_path,
-        train_steps=len(train_dl),
-        valid_steps=len(valid_dl),
-        earlystop_kwargs=None,
-        scheduler_kwargs=None,
-    )
+    kwargs: dict[str, Any] = {
+        "epochs": 2,
+        "metrics": [],
+        "logdir": tmp_path,
+        "train_steps": len(train_dl),
+        "valid_steps": len(valid_dl),
+        "earlystop_kwargs": None,
+        "scheduler_kwargs": None,
+    }
     kwargs.update(overrides)
     return TrainerSettings(**kwargs)
 
@@ -129,8 +129,8 @@ def test_reporters_called_once_per_epoch_with_resolved_epoch(tmp_path):
 
 def test_multiple_reporters_all_called_in_order(tmp_path):
     order = []
-    r1 = lambda epoch, tl, vl, m: order.append("first")  # noqa: E731
-    r2 = lambda epoch, tl, vl, m: order.append("second")  # noqa: E731
+    r1 = lambda epoch, tl, vl, m: order.append("first")
+    r2 = lambda epoch, tl, vl, m: order.append("second")
 
     trainer = _trainer(tmp_path, reporters=[r1, r2])
     trainer.loop()
@@ -198,13 +198,13 @@ def test_earlystop_kwargs_is_required(tmp_path):
     # built via **kwargs, not literal keywords, so the missing field is a runtime
     # check (the point of this test) rather than something the type checker would
     # also flag statically at the call site.
-    kwargs: dict[str, Any] = dict(
-        epochs=2,
-        metrics=[],
-        logdir=tmp_path,
-        train_steps=len(train_dl),
-        valid_steps=len(valid_dl),
-    )
+    kwargs: dict[str, Any] = {
+        "epochs": 2,
+        "metrics": [],
+        "logdir": tmp_path,
+        "train_steps": len(train_dl),
+        "valid_steps": len(valid_dl),
+    }
     with pytest.raises(ValidationError):
         TrainerSettings(**kwargs)
 
@@ -304,3 +304,110 @@ def test_custom_step_with_metrics_pays_a_second_forward_pass(tmp_path):
     calls.clear()
     trainer.evalbatches()
     assert len(calls) == 2 * len(valid_dl)  # step's own call + the metrics call
+
+
+def _scripted_trainer(
+    tmp_path, losses: list[float], earlystop_kwargs: dict[str, Any] | None
+) -> Trainer:
+    """A Trainer whose epoch `i` sets every weight to `i` and reports
+    `losses[i]` as validation loss and `{"epoch": i}` as metrics, so a
+    test can read off which epoch a result or a set of weights belongs to."""
+    trainer = _trainer(tmp_path)
+    trainer.settings = _settings(
+        tmp_path, epochs=len(losses), earlystop_kwargs=earlystop_kwargs
+    )
+    if earlystop_kwargs is not None:
+        trainer.early_stopping = EarlyStopping(trainer.log_dir, **earlystop_kwargs)
+    scripted = iter(enumerate(losses))
+    current = {"epoch": -1}
+
+    def trainbatches() -> float:
+        epoch, _ = next(scripted)
+        current["epoch"] = epoch
+        with torch.no_grad():
+            for p in trainer.model.parameters():
+                p.fill_(float(epoch))
+        return 10.0 + epoch
+
+    def evalbatches() -> tuple[dict[str, float], float]:
+        epoch = current["epoch"]
+        return {"epoch": float(epoch)}, losses[epoch]
+
+    vars(trainer).update(trainbatches=trainbatches, evalbatches=evalbatches)
+    return trainer
+
+
+def _weights_of(model: nn.Module) -> set[float]:
+    return {float(v) for p in model.parameters() for v in p.detach().flatten()}
+
+
+def test_early_stop_returns_the_best_epoch(tmp_path):
+    """Stopping `patience` epochs after the best one reports the best one."""
+    losses = [1.0, 0.5, 0.7, 0.8, 0.9, 0.1]  # epoch 5 never runs
+    trainer = _scripted_trainer(tmp_path, losses, {"patience": 3})
+    result = trainer.loop()
+
+    assert result.epoch == 1
+    assert result.stopped_epoch == 4
+    assert result.test_loss == 0.5
+    assert result.train_loss == 11.0
+    assert result.metric_dict == {"epoch": 1.0}
+    assert trainer.last_epoch == 4
+
+
+def test_early_stop_restores_the_best_weights_without_save(tmp_path):
+    losses = [1.0, 0.5, 0.7, 0.8, 0.9]
+    trainer = _scripted_trainer(tmp_path, losses, {"patience": 3, "save": False})
+    model = trainer.model
+    trainer.loop()
+
+    assert _weights_of(trainer.model) == {1.0}
+    assert trainer.model is model  # restored in place: the optimizer still holds it
+    assert not trainer.log_dir.exists()  # in memory, nothing written
+
+
+def test_early_stop_with_save_restores_and_writes_checkpoint(tmp_path):
+    losses = [1.0, 0.5, 0.7, 0.8, 0.9]
+    trainer = _scripted_trainer(tmp_path, losses, {"patience": 3, "save": True})
+    model = trainer.model
+    trainer.loop()
+
+    assert trainer.model is model
+    assert _weights_of(trainer.model) == {1.0}
+    assert trainer.early_stopping is not None
+    assert _weights_of(trainer.early_stopping.get_best()) == {1.0}
+
+
+def test_early_stopping_on_without_a_stop_returns_the_best_epoch(tmp_path):
+    """The budget runs out before patience does: the best epoch still wins."""
+    losses = [1.0, 0.5, 0.7]
+    trainer = _scripted_trainer(tmp_path, losses, {"patience": 10})
+    result = trainer.loop()
+
+    assert (result.epoch, result.stopped_epoch, result.test_loss) == (1, 2, 0.5)
+    assert _weights_of(trainer.model) == {1.0}
+
+
+def test_no_early_stopping_returns_the_last_epoch(tmp_path):
+    losses = [1.0, 0.5, 0.7, 0.8]
+    trainer = _scripted_trainer(tmp_path, losses, None)
+    result = trainer.loop()
+
+    assert result.epoch == result.stopped_epoch == 3
+    assert result.test_loss == 0.8
+    assert result.metric_dict == {"epoch": 3.0}
+    assert _weights_of(trainer.model) == {3.0}
+
+
+def test_early_stopping_counts_delta_as_no_improvement(tmp_path):
+    """An improvement smaller than delta does not move the best epoch."""
+    losses = [1.0, 0.95, 0.5, 0.49, 0.6]
+    trainer = _scripted_trainer(tmp_path, losses, {"patience": 2, "delta": 0.1})
+    result = trainer.loop()
+
+    assert (result.epoch, result.stopped_epoch) == (2, 4)
+    assert _weights_of(trainer.model) == {2.0}
+
+
+def test_trainresult_stopped_epoch_defaults_to_epoch():
+    assert TrainResult(3, 0.1, 0.2).stopped_epoch == 3

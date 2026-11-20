@@ -218,6 +218,9 @@ tuner = tune.Tuner(
 results = tuner.fit()
 ```
 
+`result` is the trial's best epoch by validation loss, not its last one: `loop()` ends on that
+epoch's weights and reports its metrics, and `result.stopped_epoch` says where the trial stopped.
+
 Worth knowing: `EarlyStopping` tracks *validation loss*, not the metric you report to ray
 (`accuracy` here). For a classification head with `CrossEntropyLoss` the two move together
 closely enough that this rarely changes which trial wins, but if your task's loss and headline

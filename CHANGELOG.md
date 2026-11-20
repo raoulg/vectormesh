@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.17.0
+
+### Fixed
+
+- **Early stopping reports the best epoch.** With `earlystop_kwargs` set, `Trainer.loop()`
+  returns the `TrainResult` of the epoch with the lowest validation loss and leaves that epoch's
+  weights in `trainer.model`, also with `save=False`: `EarlyStopping` copies the `state_dict` in
+  memory at every improvement and `loop()` loads it back into the same model object when it ends,
+  whether patience ran out or the epoch budget did. vectormesh 0.16.0 and earlier returned the
+  metrics and, with `save=False`, the weights of the last epoch, `patience` epochs past the best.
+  `save=True` still writes every improvement to `log_dir / "checkpoint.pt"`.
+- `trainer.last_epoch` after an early stop is the epoch it stopped at, so a second `loop()`
+  numbers its epochs on from there.
+- `EarlyStopping(save=True, verbose=True)` logs its first checkpoint without a `TypeError`.
+
+### Added
+
+- `TrainResult.stopped_epoch`: the last epoch that ran, next to `epoch`, the epoch the result
+  and the model belong to. Without early stopping the two are equal.
+- `EarlyStopping.best_state` (the best epoch's `state_dict`) and `EarlyStopping.improved`
+  (whether the last call improved the best loss).
+
 ## 0.16.0
 
 ### Added

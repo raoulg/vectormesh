@@ -355,10 +355,10 @@ Trainer.loop() -> TrainResult
 | Class | Fields / signature |
 |---|---|
 | `TrainerSettings` (pydantic) | `epochs: int`, `metrics: list[Callable]`, `logdir: Path`, `train_steps: int`, `valid_steps: int`, `optimizer_kwargs: dict = {}`, `scheduler_kwargs: dict \| None = {"factor": 0.1, "patience": 10}`, `earlystop_kwargs: dict \| None` **(required, no default)**. Plain data — no logging-backend field; see `reporters` above. |
-| `TrainResult` (dataclass) | `epoch: int`, `train_loss: float`, `test_loss: float`, `metric_dict: dict[str, float]` — what `.loop()` returns |
+| `TrainResult` (dataclass) | `epoch: int`, `train_loss: float`, `test_loss: float`, `metric_dict: dict[str, float]`, `stopped_epoch: int` — what `.loop()` returns. The first four describe the model `trainer.model` holds after the loop: the best epoch by validation loss with early stopping, the last epoch without. `stopped_epoch` is the last epoch that ran (defaults to `epoch`). |
 | `Reporter` (`Protocol`) | `__call__(epoch: int, train_loss: float, test_loss: float, metric_dict: dict[str, float]) -> None` — any matching callable qualifies, no subclassing |
 | `Step` (`Protocol`) | `__call__(model: nn.Module, x: BatchTensor, y: torch.Tensor) -> torch.Tensor`. Default (built from `loss_fn`): `lambda model, x, y: loss_fn(model(x), y)`. Governs the loss computation in both `trainbatches()` and `evalbatches()` — see [§6.6](06-training.md#66-step-pluggable-loss-computation). |
-| `EarlyStopping` | `(log_dir: Path, patience=7, verbose=False, delta=0.0, save=False)`; called as `early_stopping(val_loss, model)`; `.get_best() -> nn.Module` |
+| `EarlyStopping` | `(log_dir: Path, patience=7, verbose=False, delta=0.0, save=False)`; called as `early_stopping(val_loss, model)`; keeps `.best_loss`, `.best_state` (an in-memory `state_dict` copy of the best epoch), `.improved` (the last call improved) and `.early_stop`; `.get_best() -> nn.Module` loads the `save=True` checkpoint from disk |
 
 `Trainer.log_dir` is computed at construction (`logdir / f"{timestamp}-{hex6}"`) but never created
 on disk unless something writes to it — currently only `EarlyStopping.save_checkpoint` when
