@@ -117,8 +117,9 @@ optimizer.
 
 The block uses the `param_space` from §9.4. `TRAIN_CACHE` and `TEST_CACHE` stand for the two cache
 directories you built (one per split); each item holds `(chunks, dim)` vectors, which is why the
-pipeline starts with an aggregator. A cache with one vector per item drops
-`MaskedMeanAggregator()` and passes `padder=torch.stack`.
+pipeline starts with an aggregator, which reads the mask of the `Padded` batch `DynamicPadding`
+returns. A cache with one vector per item drops `MaskedMeanAggregator()` and passes
+`padder=torch.stack`.
 
 The trainable function can use `Trainer` directly rather than hand-rolling the loop: `log_dir` is
 computed but never created on disk unless something actually writes to it, and `progress=False`

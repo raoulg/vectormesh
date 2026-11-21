@@ -1,5 +1,7 @@
 """VectorMesh components module."""
 
+from vectormesh.types import Padded
+
 from .activation import Activation, ActivationKind
 from .aggregation import (
     AttentionAggregator,
@@ -56,6 +58,7 @@ __all__ = [
     "NeuralNet",
     "Norm",
     "NormKind",
+    "Padded",
     "Parallel",
     "Pool1D",
     "Pool2D",

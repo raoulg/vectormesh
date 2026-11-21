@@ -24,11 +24,12 @@ vector, ``(batch, channels, height, width) -> (batch, channels)``.
 
 from abc import abstractmethod
 
+import torch
 from beartype import beartype
-from jaxtyping import Float, jaxtyped
+from jaxtyping import Bool, Float, jaxtyped
 from torch import Tensor
 
-from vectormesh.types import BaseComponent
+from vectormesh.types import BaseComponent, Padded, VectorMeshError
 
 
 class SequenceComponent(BaseComponent):
@@ -105,12 +106,38 @@ class Connector(BaseComponent):
     ``connect``. beartype checks one random element of a ``tuple[X, ...]`` but every
     argument of ``*tensors``, so this is what makes every branch checked, and a named axis
     in ``connect``'s annotation bind across all branches and the output.
+
+    When a branch is a `Padded` batch, ``connect`` joins the values and
+    ``connect_mask`` the masks, and the result is `Padded`. A branch without a mask
+    counts as all real. A connector without ``connect_mask`` rejects `Padded` branches.
     """
 
+    takes_padded = True
+
     def forward(
-        self, tensors: tuple[Float[Tensor, "..."], ...]
-    ) -> Float[Tensor, "..."]:
-        return self.connect(*tensors)
+        self, tensors: tuple[Float[Tensor, "..."] | Padded, ...]
+    ) -> Float[Tensor, "..."] | Padded:
+        values = [t.values if isinstance(t, Padded) else t for t in tensors]
+        if not any(isinstance(t, Padded) for t in tensors):
+            return self.connect(*values)
+        masks = [
+            t.mask
+            if isinstance(t, Padded)
+            else torch.ones(t.shape[:2], dtype=torch.bool, device=t.device)
+            for t in tensors
+        ]
+        mask = self.connect_mask(*masks)  # first: a connector without masks says so
+        return Padded(self.connect(*values), mask)
 
     @abstractmethod
     def connect(self, *tensors: Float[Tensor, "..."]) -> Float[Tensor, "..."]: ...
+
+    def connect_mask(self, *masks: Bool[Tensor, "batch _"]) -> Bool[Tensor, "batch _"]:
+        """The mask of the joined branches, from the mask of each branch."""
+        raise VectorMeshError(
+            f"{type(self).__name__} got a Padded branch, but has no way to join masks.",
+            hint="a padded sequence has to keep its sequence axis to keep its mask; "
+            "this connector joins vectors.",
+            fix="aggregate each padded branch (e.g. MaskedMeanAggregator) before "
+            "this connector, or use Concatenate3D / ConcatenateSequence.",
+        )

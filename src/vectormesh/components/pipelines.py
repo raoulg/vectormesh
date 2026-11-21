@@ -4,10 +4,10 @@ from typing import Any
 
 import torch
 from beartype import beartype
-from jaxtyping import Float, Int, jaxtyped
+from jaxtyping import Bool, Float, Int, jaxtyped
 from torch import Tensor, nn
 
-from vectormesh.types import BaseComponent, TensorInput
+from vectormesh.types import BaseComponent, TensorInput, VectorMeshError, call_masked
 
 
 class Lift(BaseComponent):
@@ -35,9 +35,11 @@ class Serial(BaseComponent):
     Tensor checking happens via jaxtyping decorators on each component.
 
     A Serial is a component made of components, so pipelines nest: a Serial of
-    Parallels of Serials. An empty Serial is the identity.
+    Parallels of Serials. An empty Serial is the identity. A `Padded` batch goes to
+    each component as it is, so its mask reaches every component that takes one.
     """
 
+    takes_padded = True
     components: nn.ModuleList
 
     def __init__(self, components: Sequence[BaseComponent | nn.Module]):
@@ -58,9 +60,11 @@ class Parallel(BaseComponent):
     All branches receive the same input of Tuple[Tensor, ...] and return Tuple[Tensor, ...].
 
     The number of branches must match the number of tensors in the input tuple. A
-    Parallel is a component made of components, like Serial.
+    Parallel is a component made of components, like Serial. An input that is a
+    `Padded` batch goes to its branch as it is.
     """
 
+    takes_padded = True
     branches: nn.ModuleList
 
     def __init__(self, branches: Sequence[BaseComponent | nn.Module]):
@@ -69,6 +73,11 @@ class Parallel(BaseComponent):
 
     @jaxtyped(typechecker=beartype)
     def forward(self, tensors: TensorInput) -> TensorInput:
+        if not isinstance(tensors, tuple):
+            raise VectorMeshError(
+                f"Parallel takes a tuple of inputs, one per branch, got a "
+                f"{type(tensors).__name__}."
+            )
         return tuple(branch(t) for branch, t in zip(self.branches, tensors))
 
 
@@ -77,7 +86,8 @@ class Skip(BaseComponent):
 
     An architecture form, like `Serial` and `Parallel`: it has no rank of its own, and
     works at whatever rank its transform does. The input is layer-normed first (pre-norm),
-    and the residual is that normed input, through ``projection`` when given.
+    and the residual is that normed input, through ``projection`` when given. On a
+    `Padded` batch the transform and the projection get the mask too.
 
     Args:
         transform: the component the residual goes around.
@@ -104,11 +114,15 @@ class Skip(BaseComponent):
 
     @jaxtyped(typechecker=beartype)
     def forward(
-        self, tensors: Float[Tensor, "*lead {self.in_size}"]
+        self,
+        tensors: Float[Tensor, "*lead {self.in_size}"],
+        mask: Bool[Tensor, "*mlead"] | None = None,
     ) -> Float[Tensor, "*lead out"]:
         tensors = self.layernorm(tensors)
-        residual = self.projection(tensors) if self.projection else tensors
-        return self.transform(tensors) + residual
+        residual = (
+            call_masked(self.projection, tensors, mask) if self.projection else tensors
+        )
+        return call_masked(self.transform, tensors, mask) + residual
 
 
 def _ema_update(target: nn.Module, online: nn.Module, momentum: float) -> None:

@@ -282,6 +282,7 @@ def test_collate_batches_a_fixed_shape_cache(fixed: VectorCache, steps):
     X, y = next(iter(loader))
 
     assert X.shape == (5, STEPS, 1)
-    assert X.dtype == torch.float32
-    assert torch.equal(X[..., 0], torch.from_numpy(steps[:5]))
+    assert X.values.dtype == torch.float32
+    assert X.mask.all()  # every row of a fixed-shape column is full length
+    assert torch.equal(X.values[..., 0], torch.from_numpy(steps[:5]))
     assert y.tolist() == [0.0, 1.0, 0.0, 1.0, 0.0]

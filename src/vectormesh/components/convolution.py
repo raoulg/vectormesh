@@ -12,8 +12,9 @@ An annotation names the axis a window shortens (``seq_out``, ``height_out``,
 from typing import Literal
 
 import torch
+import torch.nn.functional as F
 from beartype import beartype
-from jaxtyping import Float, jaxtyped
+from jaxtyping import Bool, Float, jaxtyped
 from torch import Tensor, nn
 
 from vectormesh.components.contracts import ImageComponent, SlidingComponent
@@ -46,6 +47,20 @@ def _sliding_length(
             "component",
         )
     return positions
+
+
+def _window_mask(
+    mask: Bool[Tensor, "batch seq"],
+    kernel_size: int,
+    stride: int,
+    padding: int = 0,
+    dilation: int = 1,
+) -> Bool[Tensor, "batch seq_out"]:
+    """The mask after a sliding window: a window is real when it reads at least one
+    real position; the zeros added at the ends are padding."""
+    ends = F.pad(mask.float().unsqueeze(1), (padding, padding))
+    pooled = F.max_pool1d(ends, kernel_size, stride, dilation=dilation)
+    return pooled.squeeze(1) > 0
 
 
 def _check_kind(component: str, kind: str) -> None:
@@ -112,6 +127,15 @@ class Conv1D(SlidingComponent):
             self.dilation,
         )
 
+    def output_mask(
+        self, mask: Bool[Tensor, "batch seq"]
+    ) -> Bool[Tensor, "batch seq_out"]:
+        """Which output positions are real: those whose window reads at least one
+        real input position."""
+        return _window_mask(
+            mask, self.kernel_size, self.stride, self.padding, self.dilation
+        )
+
     @jaxtyped(typechecker=beartype)
     def forward(
         self, tensors: Float[Tensor, "batch seq {self.in_size}"]
@@ -156,6 +180,13 @@ class Pool1D(SlidingComponent):
         return _sliding_length(
             "Pool1D", "seq", length, self.kernel_size, stride=self.kernel_size
         )
+
+    def output_mask(
+        self, mask: Bool[Tensor, "batch seq"]
+    ) -> Bool[Tensor, "batch seq_out"]:
+        """Which output positions are real: those whose window holds at least one
+        real input position."""
+        return _window_mask(mask, self.kernel_size, self.kernel_size)
 
     @jaxtyped(typechecker=beartype)
     def forward(

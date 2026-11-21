@@ -1,6 +1,6 @@
 import torch
 from beartype import beartype
-from jaxtyping import Float, jaxtyped
+from jaxtyping import Bool, Float, jaxtyped
 from torch import Tensor
 
 from vectormesh.components.contracts import Connector
@@ -37,8 +37,8 @@ class Concatenate3D(Connector):
     output: (batch chunks total)   where total = dim1 + dim2 + ...
 
     Branches must share the same chunk dimension (e.g. both padded to max_chunks
-    with FixedPadding). A padded chunk stays all-zero across the concatenation, so
-    downstream padding masks (MaskedMeanAggregator, TransformerBlock) still fire.
+    with FixedPadding). On `Padded` branches a chunk is real when it is real in any
+    branch.
     """
 
     @jaxtyped(typechecker=beartype)
@@ -46,6 +46,12 @@ class Concatenate3D(Connector):
         self, *tensors: Float[Tensor, "batch chunks _"]
     ) -> Float[Tensor, "batch chunks total"]:
         return torch.cat(tensors, dim=-1)
+
+    @jaxtyped(typechecker=beartype)
+    def connect_mask(
+        self, *masks: Bool[Tensor, "batch chunks"]
+    ) -> Bool[Tensor, "batch chunks"]:
+        return torch.stack(masks).any(dim=0)
 
 
 class ConcatenateSequence(Connector):
@@ -60,9 +66,10 @@ class ConcatenateSequence(Connector):
     chunk counts may differ. Where `Concatenate3D` lengthens the feature axis, this
     lengthens the sequence axis; the rank stays 3 either way.
 
-    Padding from each branch ends up in the middle of the joined sequence. The padding
-    masks of `MaskedMeanAggregator`, `RNNAggregator` and `TransformerBlock` find all-zero
-    rows at any position.
+    On `Padded` branches the masks are joined the same way, so padding from each
+    branch sits in the middle of the joined sequence and stays marked there;
+    `MaskedMeanAggregator`, `RNNAggregator`, `Recurrent` and `TransformerBlock` handle
+    padding at any position.
     """
 
     @jaxtyped(typechecker=beartype)
@@ -70,6 +77,12 @@ class ConcatenateSequence(Connector):
         self, *tensors: Float[Tensor, "batch _ dim"]
     ) -> Float[Tensor, "batch total dim"]:
         return torch.cat(tensors, dim=1)
+
+    @jaxtyped(typechecker=beartype)
+    def connect_mask(
+        self, *masks: Bool[Tensor, "batch _"]
+    ) -> Bool[Tensor, "batch total"]:
+        return torch.cat(masks, dim=1)
 
 
 class Stack2D(Connector):

@@ -2,10 +2,13 @@
 
 from typing import Literal
 
+import torch
 from beartype import beartype
-from jaxtyping import Float, jaxtyped
+from jaxtyping import Bool, Float, jaxtyped
 from torch import Tensor, nn
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
+from vectormesh.components.aggregation import real_first
 from vectormesh.components.contracts import SequenceComponent
 from vectormesh.types import VectorMeshError
 
@@ -29,8 +32,10 @@ class Recurrent(SequenceComponent):
     ``lstm``  a long short-term memory, with its own cell state (``nn.LSTM``)
     ========  ===========================================================
 
-    Every step is computed, padding included, so it suits sequences without padding.
-    For padded chunks, ``RNNAggregator`` runs a GRU over the real chunks only.
+    With a mask (a `Padded` batch) the recurrence runs over each item's real steps
+    only, in their order, also when padding sits between them; a padded step's
+    output is zero. ``LastAggregator`` after it then takes the state after the last
+    real step. Without a mask every step is real.
 
     Args:
         in_size: width of the input's last axis.
@@ -64,10 +69,25 @@ class Recurrent(SequenceComponent):
 
     @jaxtyped(typechecker=beartype)
     def forward(
-        self, tensors: Float[Tensor, "batch seq {self.in_size}"]
+        self,
+        tensors: Float[Tensor, "batch seq {self.in_size}"],
+        mask: Bool[Tensor, "batch seq"] | None = None,
     ) -> Float[Tensor, "batch seq {self.hidden_size}"]:
-        states, _ = self.rnn(tensors)
-        return states
+        if mask is None:
+            states, _ = self.rnn(tensors)
+            return states
+        seq = tensors.shape[1]
+        compact, order, lengths = real_first(tensors, mask)
+        packed = pack_padded_sequence(
+            compact, lengths, batch_first=True, enforce_sorted=False
+        )
+        states, _ = pad_packed_sequence(
+            self.rnn(packed)[0], batch_first=True, total_length=seq
+        )
+        states = states * mask.sum(dim=1).gt(0).view(-1, 1, 1)  # all padding: zeros
+        # compact step j is step order[:, j] of the item; steps past its length are padding
+        out = torch.zeros_like(states)
+        return out.scatter(1, order.unsqueeze(-1).expand_as(states), states)
 
     def extra_repr(self) -> str:
         return (

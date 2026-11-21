@@ -64,12 +64,40 @@ and works at whatever rank its transform does.
 
 ## 4.2 Padding — `padding.py`
 
-Padders are plain callables (not `nn.Module`s) used inside `Collate`, before the model.
+Padders are plain callables (not `nn.Module`s) used inside `Collate`, before the model. Both
+return a **`Padded`** batch: `values`, the zero-padded tensor, and `mask`, `(B, C)`, True where a
+chunk is real and False where it is padding.
 
 | Class | Signature | Output | Trade-off |
 |---|---|---|---|
-| `FixedPadding(max_chunks)` | `list[(C_i, D)]` → `(B, max_chunks, D)` | pads short, **truncates long** | static shape; loses tail of long documents |
-| `DynamicPadding()` | `list[(C_i, D)]` → `(B, max(C_i), D)` | pads to batch max | no data loss; shape varies per batch |
+| `FixedPadding(max_chunks)` | `list[(C_i, D)]` → `Padded((B, max_chunks, D), (B, max_chunks))` | pads short, **truncates long** | static shape; loses tail of long documents |
+| `DynamicPadding()` | `list[(C_i, D)]` → `Padded((B, max(C_i), D), (B, max(C_i)))` | pads to batch max | no data loss; shape varies per batch |
+
+### `Padded(values, mask)` — the mask travels with the values
+
+The mask is known when the batch is padded, from each item's length, so it is carried, not
+reconstructed from the values later: a `Projection` with a bias, a `LayerNorm` or attention
+writes non-zero values at padded positions, and after that no one can tell padding from data.
+
+Every component takes a `Padded` batch. It runs on `values`; a component whose `forward` takes a
+`mask` argument also gets the mask (the aggregators below except `MeanAggregator`, `Attention`,
+`TransformerBlock`, `Recurrent`, `SparseMoE`, and `Skip`, `Highway` and `MoE`, which pass it to
+what they hold). What comes out is `Padded` again while the sequence axis is there — with the same
+mask when the length stays, mapped through the window when `Conv1D` or `Pool1D` changes it — and
+a plain tensor after an aggregator. `Serial` and `Parallel` hand `Padded` batches on as they are,
+and the connectors join the masks with the values (§4.5). So the mask needs no wiring:
+
+```python
+batch = FixedPadding(max_chunks=30)(chunks)     # Padded: .values (B, 30, 768), .mask (B, 30)
+batch.shape, batch.lengths                      # (B, 30, 768), real chunks per item
+Serial([Projection(768, 64), TransformerBlock(64), MaskedMeanAggregator()])(batch)  # (B, 64)
+```
+
+A component called on a plain tensor gets no mask: every position counts as real, and
+`MaskedMeanAggregator` raises, since it has no way to know. Pass `mask=` yourself to call a
+component on a tensor you padded by hand. A component of your own that changes the sequence length
+defines `output_mask(mask)`; without it, a `Padded` batch raises rather than lose its mask. In a
+model class of your own, `batch.values` and `batch.mask` are the two parts.
 
 Pick `max_chunks` from the `chunk_sizes` histogram in the cache metadata. In the legal dataset,
 `30` covers the bulk of documents; `45` (used by `scripts/train_moe_parallel.py`) trades compute
@@ -88,28 +116,23 @@ become a fixed-size representation.
 
 | Class | Parameters | Behaviour |
 |---|---|---|
-| `MeanAggregator()` | none | plain `tensors.mean(dim=1)` — **counts zero-padding into the mean** |
-| `MaskedMeanAggregator()` | none | detects padded chunks (all-zero rows) and excludes them; `clamp(min=1)` guards against an all-padding row |
-| `AttentionAggregator(hidden_size)` | `Linear(D, 1)` | softmax weights over chunks, then weighted sum — learns *which* chunks matter |
-| `RNNAggregator(hidden_size)` | `GRU(D, D)` | runs a GRU over the real chunks (all-zero rows skipped), returns the hidden state after the last one — the only aggregator with parameters that is order-sensitive |
-| `LastAggregator()` | none | the last step, `tensors[:, -1]` — after a `Recurrent`, the state after the whole sequence; padding at the end is read as the last step |
+| `MeanAggregator()` | none | plain `tensors.mean(dim=1)` — **counts padding into the mean**, mask or not |
+| `MaskedMeanAggregator()` | none | mean over the real chunks of the mask; needs a mask (a `Padded` batch) and raises without one; an all-padding item gives a zero vector |
+| `AttentionAggregator(hidden_size)` | `Linear(D, 1)` | softmax weights over chunks, then weighted sum — learns *which* chunks matter; padded chunks get weight 0 |
+| `RNNAggregator(hidden_size)` | `GRU(D, D)` | runs a GRU over the real chunks, returns the hidden state after the last one — the only aggregator with parameters that is order-sensitive |
+| `LastAggregator()` | none | the last real step — after a `Recurrent`, the state after the whole sequence; without a mask, `tensors[:, -1]` |
 
 **Choosing one:** if your padder is `FixedPadding`, `MaskedMeanAggregator` is almost always the
 right default — `MeanAggregator` will systematically shrink short documents toward zero.
 
-> **Caveat:** `MaskedMeanAggregator` detects padding by looking for **all-zero rows**. That works
-> immediately after a padder, and survives `Concatenate3D` (zeros concatenated with zeros are
-> still zeros). It does **not** survive a `TransformerBlock` or any other block with a bias or a
-> `LayerNorm`, which writes non-zero values at padded positions. Put it directly after the
-> padding, or accept that it has nothing left to mask — see
-> [§5.5](05-architectures.md#55-chunk-level-fusion-with-an-moe-transformer).
+The masked aggregators read the mask the padder made (§4.2), so they work anywhere after the
+padder: after a `Projection`, a `TransformerBlock`, an `MoE`, or a `Concatenate3D`.
 
 `AttentionAggregator` is the natural next step when you suspect only a few chunks carry the
-signal. `RNNAggregator` is the one to reach for when chunk *order* is meaningful. It detects
-padding the same way as `MaskedMeanAggregator`, moves each item's real chunks to the front in
-their own order, and packs the sequence, so the GRU never sees a padded chunk: padding at the end
-and gaps in the middle (after concatenating two padded sequences) give the same result as the
-real chunks alone. The same caveat applies: put it directly after the padding.
+signal. `RNNAggregator` is the one to reach for when chunk *order* is meaningful. It moves each
+item's real chunks to the front in their own order and packs the sequence, so the GRU never sees
+a padded chunk: padding at the end and gaps in the middle (after `ConcatenateSequence`) give the
+same result as the real chunks alone.
 
 ---
 
@@ -138,8 +161,8 @@ dropout are values of their own axes, so a search switches them by name; with `"
 
 ### `Attention(hidden_size, num_heads=8, dropout=0.1)`
 
-Bare multi-head self-attention on `(B, seq, D)`, no residual, no norm, no padding mask. A
-teaching primitive; prefer `TransformerBlock` in real pipelines.
+Bare multi-head self-attention on `(B, seq, D)`, no residual, no norm. On a `Padded` batch no
+position attends to padding. A teaching primitive; prefer `TransformerBlock` in real pipelines.
 
 ### `TransformerBlock(hidden_size, num_heads=8, dropout=0.1)`
 
@@ -155,9 +178,10 @@ Three things worth knowing:
 - **Shape-preserving by construction.** Both residual additions require the block to return the
   width it received, so there is a single `hidden_size` and no output width to choose. Put a
   `Projection` before or after the block to change width.
-- **`_pad_mask`** reconstructs the key-padding mask from all-zero rows, so you do not have to
-  thread a mask through the pipeline. A fully-padded row would make the attention softmax
-  produce `NaN`, so such a row is treated as fully valid instead.
+- **Padding.** On a `Padded` batch the mask becomes the attention's key-padding mask, so no
+  position attends to padding. The outputs at padded positions are still computed; the mask that
+  travels on marks them for what comes next. An item that is all padding would make the softmax
+  `NaN`, so it attends over all its positions instead.
 - It is rank-3 only (`(B, seq, D)`), by design.
 
 ---
@@ -176,15 +200,16 @@ checked and the named axes bind across branches.
 | `Stack2D()` | `((B, D), (B, D), …)` | `(B, n, D)` — a new axis |
 
 `Concatenate3D` requires the branches to share the chunk axis, which is why both padders in
-`CollateParallel` must use the same `max_chunks`. A useful property: a padded chunk stays
-all-zero after concatenation, so downstream padding detection (`MaskedMeanAggregator`,
-`TransformerBlock._pad_mask`) still fires correctly.
+`CollateParallel` must use the same `max_chunks`. On `Padded` branches the result is `Padded`, and
+a chunk is real when it is real in any branch.
 
 `ConcatenateSequence` lengthens the sequence instead of the features: it puts the branches one
 after the other, so a `TransformerBlock` can attend across them (text chunks next to image
-patches). The widths must match, so a branch usually ends in a `Projection`. The padding of each
-branch lands in the middle of the joined sequence; `MaskedMeanAggregator`, `RNNAggregator` and
-`TransformerBlock._pad_mask` find all-zero rows at any position.
+patches). The widths must match, so a branch usually ends in a `Projection`. The masks are joined
+the same way, so the padding of each branch sits in the middle of the joined sequence and stays
+marked; the masked aggregators, `Recurrent` and `TransformerBlock` handle padding at any position.
+A branch that is a plain tensor counts as all real. `Concatenate2D` and `Stack2D` join vectors and
+reject a `Padded` branch: aggregate it first.
 
 `Stack2D` is the interesting one pedagogically: it converts *n parallel representations* into a
 *sequence of length n*, which you can then feed to attention. Fusion by attention rather than

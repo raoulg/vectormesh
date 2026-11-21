@@ -173,9 +173,12 @@ A genuine trade-off, not a default to memorise. `max_chunks` is a hyperparameter
 you truncate away signal, too large and you spend most of your compute on zeros.
 
 Zero padding also has a downstream cost — a plain mean over chunks averages the zeros in and
-shrinks every short document's representation toward the origin. That is why
-`MaskedMeanAggregator` exists, and why `TransformerBlock` reconstructs a key-padding mask from
-all-zero rows.
+shrinks every short document's representation toward the origin. So a padder returns more than
+the padded tensor: a `Padded` batch holds the values and a **mask** of the real chunks, built
+from each document's length. The mask travels with the values through the pipeline, and the
+components that must not see padding read it: `MaskedMeanAggregator` leaves padded chunks out of
+the mean, `TransformerBlock` does not attend to them. It is not guessed from the values, which
+a `Projection` with a bias would turn non-zero.
 
 ## 1.6 Composition over configuration
 

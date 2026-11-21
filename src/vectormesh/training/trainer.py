@@ -11,14 +11,18 @@ from loguru import logger
 from torch.optim import Optimizer
 from tqdm import tqdm
 
+from vectormesh.types import Padded
+
 from .settings import TrainerSettings
 
 OptimizerType = TypeVar("OptimizerType", bound=torch.optim.Optimizer)
 
-# A batch input is either a single tensor or a tuple of tensors (e.g. packed
-# sequences); the target is always a tensor.
+# A batch input is a tensor, a Padded batch (from a padder), or a tuple of those
+# (one per Parallel branch); the target is always a tensor.
 BatchTensor = (
-    Shaped[torch.Tensor, "batch ..."] | tuple[Shaped[torch.Tensor, "..."], ...]
+    Shaped[torch.Tensor, "batch ..."]
+    | Padded
+    | tuple[Shaped[torch.Tensor, "..."] | Padded, ...]
 )
 #: the target of a batch, one row per example
 TargetTensor = Shaped[torch.Tensor, "batch ..."]
@@ -211,15 +215,18 @@ class Trainer:
     def _to_device(
         self, x: BatchTensor, y: TargetTensor
     ) -> tuple[BatchTensor, TargetTensor]:
-        """Move a batch onto self.device, handling tuple inputs (e.g. packed
-        sequences) as well as single tensors."""
+        """Move a batch onto self.device: a tensor, a `Padded` batch, or a tuple
+        of those (one per `Parallel` branch)."""
         if not self.device:
             return x, y
-        if isinstance(x, tuple):
-            x = tuple(xx.to(self.device) for xx in x)
-        else:
-            x = x.to(self.device)
-        return x, y.to(self.device)
+        device = self.device
+
+        def move(item: Any) -> Any:
+            if isinstance(item, tuple):
+                return tuple(move(i) for i in item)
+            return item.to(device)
+
+        return move(x), y.to(device)
 
     def _next_batch(
         self, loader: Iterable, cache: str

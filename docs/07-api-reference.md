@@ -33,7 +33,7 @@ Not re-exported, import from the module: `detect_device`, `build_legal_reference
 RankPolymorphicComponent, SequenceComponent, SlidingComponent, ImageComponent,
 BaseAggregator, Connector,
 Serial, Parallel, Skip, Lift, Siamese, JEPA,
-FixedPadding, DynamicPadding,
+FixedPadding, DynamicPadding, Padded,
 MeanAggregator, MaskedMeanAggregator, AttentionAggregator, RNNAggregator, LastAggregator,
 NeuralNet, Projection, Dense, Attention, TransformerBlock,
 Conv1D, Pool1D, Conv2D, Pool2D, GlobalPool2D, Recurrent,
@@ -247,10 +247,10 @@ Output folder name: `{YYYYMMDDHHMMSS}_{dataset_tag}_{column_name}`.
 |---|---|---|---|
 | `Serial` | — | `(components: list[nn.Module])` | passthrough |
 | `Parallel` | — | `(branches: list[nn.Module])` | tuple → tuple |
-| `FixedPadding` | — (collate callable) | `(max_chunks: int)` | `list[(C_i, D)]` → `(B, max_chunks, D)` |
-| `DynamicPadding` | — (collate callable) | `()` | `list[(C_i, D)]` → `(B, max C_i, D)` |
+| `FixedPadding` | — (collate callable) | `(max_chunks: int)` | `list[(C_i, D)]` → `Padded`, values `(B, max_chunks, D)` |
+| `DynamicPadding` | — (collate callable) | `()` | `list[(C_i, D)]` → `Padded`, values `(B, max C_i, D)` |
 | `MeanAggregator` | `BaseAggregator` | `()` | `(B, _, D)` → `(B, D)` |
-| `MaskedMeanAggregator` | `BaseAggregator` | `()` | `(B, _, D)` → `(B, D)` |
+| `MaskedMeanAggregator` | `BaseAggregator` | `()` | `(B, C, D)` → `(B, D)`; needs `mask` (a `Padded` batch) |
 | `AttentionAggregator` | `BaseAggregator` | `(hidden_size: int)` | `(B, _, D)` → `(B, D)` |
 | `RNNAggregator` | `BaseAggregator` | `(hidden_size: int)` | `(B, _, D)` → `(B, D)` |
 | `LastAggregator` | `BaseAggregator` | `()` | `(B, _, D)` → `(B, D)`, the last step |
@@ -285,6 +285,16 @@ Note the keyword is `hidden_size` (not `in_size`) for `NeuralNet` and `Projectio
 one that takes `in_size`. `NeuralNet(hidden_size=[d, w, …], out_size)` names the whole width chain
 from the input dimension through every hidden layer; a bare `int` means one hidden layer as wide
 as the input.
+
+`Padded(values, mask)` (`vectormesh.components` or `vectormesh.types`) is a frozen dataclass:
+`values: (B, seq, …)`, `mask: Bool (B, seq)`, True for real positions; `.shape` is the values'
+shape, `.lengths` the real positions per item, `.to(device)` moves both. Every component takes
+one (see [§4.2](04-components.md#42-padding--paddingpy)). The components whose `forward` takes
+`mask: Bool[Tensor, "batch seq"] | None = None` read it: `MaskedMeanAggregator` (required),
+`AttentionAggregator`, `RNNAggregator`, `LastAggregator`, `Attention`, `TransformerBlock`,
+`Recurrent`, `SparseMoE`, and `Skip`, `Highway`, `MoE`, which pass it on. `Conv1D` and `Pool1D`
+have `output_mask(mask)`. A `Connector` joins masks with `connect_mask(*masks)`:
+`Concatenate3D` (any branch real), `ConcatenateSequence` (concatenated).
 
 ---
 

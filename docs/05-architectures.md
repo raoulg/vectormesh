@@ -144,7 +144,7 @@ flowchart TD
     R["chunked regex (B, 45, 123)"] --> C3
     C3 --> P["Projection(891 -> 32)"]
     P --> M["MoE of 2 TransformerBlocks<br/>(B, 45, 32) -> (B, 45, 32)"]
-    M --> AG[MeanAggregator] --> DO[Dropout 0.2] --> PR["Projection(32 -> 32)"] --> L["logits (B, 32)"]
+    M --> AG[MaskedMeanAggregator] --> DO[Dropout 0.2] --> PR["Projection(32 -> 32)"] --> L["logits (B, 32)"]
 ```
 
 ```python
@@ -158,7 +158,7 @@ pipeline = Serial([
     Concatenate3D(),                          # (X1, X2) -> (B, C, emb + regex)
     Projection(fused_dim, HIDDEN_SIZE),       #          -> (B, C, 32)
     moe,                                      #          -> (B, C, 32)   per-chunk routing
-    MeanAggregator(),                         #          -> (B, 32)
+    MaskedMeanAggregator(),                   #          -> (B, 32)
     torch.nn.Dropout(0.2),
     Projection(HIDDEN_SIZE, NUM_CLASSES),     #          -> (B, 32) logits
 ])
@@ -176,21 +176,12 @@ Two prerequisites, both structural:
 Note that this pipeline takes a tuple as input without a `Parallel` in front — `Concatenate3D`
 consumes the tuple directly, because neither branch needs its own preprocessing here.
 
-**Why the plain `MeanAggregator` here, and not the masked one?** This is a subtle and instructive
-point. `MaskedMeanAggregator` detects padding by looking for all-zero rows — but by the time the
-tensor reaches the aggregator, the `TransformerBlock` has already destroyed that signature. Its
-pre-norm `LayerNorm` maps an all-zero row to its own `bias`, and the attention output at that
-position is a weighted sum over the *valid* keys, so the residual `x + attn_out` is non-zero even
-where `x` was zero. Swapping in `MaskedMeanAggregator` at this position is a **no-op** — it finds
-nothing to mask.
-
-The block does still respect padding where it counts: `_pad_mask` keeps padded positions from
-being attended *to*. What leaks is their contribution as *queries*, into the mean.
-
-If you want that closed properly, the mask has to be captured from the input (before the MoE) and
-re-applied afterwards — which means threading a mask through the pipeline, a design change rather
-than a component swap. Worth attempting as an exercise; measure whether it moves the metric before
-committing to the complexity.
+**Where the padding goes.** Both padders return a `Padded` batch, so the tuple holds two masks;
+`Concatenate3D` joins them, and the mask then rides along through the `Projection` and the `MoE`
+to the aggregator. Inside the `MoE` each `TransformerBlock` expert gets the mask, so no chunk
+attends to padding, and `MaskedMeanAggregator` leaves the padded chunks out of the mean, although
+by then the `Projection`'s bias, the `LayerNorm`s and the attention have written non-zero values
+there. A `MeanAggregator` in its place would average those values in.
 
 ---
 

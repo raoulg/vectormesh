@@ -127,8 +127,22 @@ class Dense(RankPolymorphicComponent):
         return self.layers(tensors)
 
 
+def key_padding_mask(
+    mask: Bool[Tensor, "batch seq"] | None,
+) -> Bool[Tensor, "batch seq"] | None:
+    """PyTorch's ``key_padding_mask`` (True for padding) from a mask of real
+    positions. An item that is all padding attends over all its positions, since
+    attending over none gives NaN."""
+    if mask is None:
+        return None
+    return ~mask & mask.any(dim=1, keepdim=True)
+
+
 class Attention(SequenceComponent):
-    """Multi-head self-attention using PyTorch's implementation."""
+    """Multi-head self-attention using PyTorch's implementation.
+
+    With a mask (a `Padded` batch) no position attends to padding.
+    """
 
     def __init__(self, hidden_size: int, num_heads: int = 8, dropout: float = 0.1):
         super().__init__()
@@ -142,9 +156,17 @@ class Attention(SequenceComponent):
 
     @jaxtyped(typechecker=beartype)
     def forward(
-        self, tensors: Float[Tensor, "batch seq {self.hidden_size}"]
+        self,
+        tensors: Float[Tensor, "batch seq {self.hidden_size}"],
+        mask: Bool[Tensor, "batch seq"] | None = None,
     ) -> Float[Tensor, "batch seq {self.hidden_size}"]:
-        attn_output, _ = self.attn(tensors, tensors, tensors, need_weights=False)
+        attn_output, _ = self.attn(
+            tensors,
+            tensors,
+            tensors,
+            key_padding_mask=key_padding_mask(mask),
+            need_weights=False,
+        )
         return attn_output
 
 
@@ -158,6 +180,9 @@ class TransformerBlock(SequenceComponent):
     Shape-preserving: both residual additions require the block to return the same
     width it received, so there is a single ``hidden_size`` and no output size to
     choose. Put a ``Projection`` before or after the block to change width.
+
+    With a mask (a `Padded` batch) no position attends to padding. Without one every
+    position is real.
     """
 
     def __init__(
@@ -178,29 +203,18 @@ class TransformerBlock(SequenceComponent):
         self.norm2 = nn.LayerNorm(hidden_size)
         self.ff = NeuralNet(hidden_size, hidden_size)
 
-    @staticmethod
-    def _pad_mask(tensors: Float[Tensor, "batch seq dim"]) -> Bool[Tensor, "batch seq"]:
-        """Reconstruct the key padding mask from all-zero (padded) positions.
-        This avoids the need to pass the mask through the pipeline
-
-        A fully-padded row would make attention's softmax produce NaNs,
-        so such a (pathological) row is treated as fully valid instead.
-        """
-        pad_mask = tensors.abs().sum(dim=-1) == 0  # (batch, seq)
-        return pad_mask & ~pad_mask.all(dim=1, keepdim=True)
-
     @jaxtyped(typechecker=beartype)
     def forward(
-        self, tensors: Float[Tensor, "batch seq {self.hidden_size}"]
+        self,
+        tensors: Float[Tensor, "batch seq {self.hidden_size}"],
+        mask: Bool[Tensor, "batch seq"] | None = None,
     ) -> Float[Tensor, "batch seq {self.hidden_size}"]:
-        pad_mask = self._pad_mask(tensors)
-
         normed = self.norm1(tensors)
         attn_out, _ = self.attn(
             normed,
             normed,
             normed,
-            key_padding_mask=pad_mask,
+            key_padding_mask=key_padding_mask(mask),
             need_weights=False,
         )
         tensors = tensors + attn_out

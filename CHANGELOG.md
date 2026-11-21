@@ -1,5 +1,57 @@
 # Changelog
 
+## 0.18.0
+
+### Fixed
+
+- **Padding is marked by a mask, not guessed from zeros.** `MaskedMeanAggregator`,
+  `RNNAggregator` and `TransformerBlock` took an all-zero chunk for padding. A `Projection` with a
+  bias, a `LayerNorm` or attention before them turns padding into non-zero values, so nothing was
+  masked: after `Projection(384, 64)` `MaskedMeanAggregator` gave exactly what `MeanAggregator`
+  gives, and RNNs and attention ran over padding. `FixedPadding` and `DynamicPadding` now return a
+  `Padded` batch, the padded values with a mask of the real chunks, and the mask travels through
+  every component, `Serial`, `Parallel` and the connectors to the components that read it.
+- **`SparseMoE` learns its routing at `k=1`.** The weight of a chosen expert was a softmax over
+  the `k` chosen logits only, which at `k=1` is always 1, so the router got no gradient and never
+  changed. Each chosen expert is now weighted by its probability under the softmax over all `N`
+  logits, as in the Switch Transformer.
+- **Validation metrics and losses are exact when the last batch is shorter.** `Trainer` averaged
+  per-batch metric values and losses, so with batches of 32, 32, 32 and 4 the last 4 examples
+  weighed a quarter (0.555 reported against 0.570 accuracy on 100 documents). Losses are now
+  means per example, and every metric is computed once on the targets and predictions of the
+  whole validation pass, which is also exact for F1.
+
+### Added
+
+- `Padded(values, mask)` (`vectormesh.components`), with `.shape`, `.lengths` and `.to(device)`.
+  A component called on one runs on `values` and gets `mask` when its `forward` takes one; the
+  result is `Padded` while it keeps the sequence axis.
+- A `mask` argument on `MaskedMeanAggregator`, `AttentionAggregator` (padding gets weight 0),
+  `RNNAggregator`, `LastAggregator` (the last real step), `Attention` (key padding mask),
+  `TransformerBlock`, `Recurrent` (runs over the real steps only), `SparseMoE` (routes only real
+  positions), and `Skip`, `Highway` and `MoE`, which pass it to the modules they hold.
+- `Conv1D.output_mask` and `Pool1D.output_mask`: a window is real when it reads a real position.
+- `Connector.connect_mask`, for `Concatenate3D` (a chunk is real in any branch) and
+  `ConcatenateSequence` (masks concatenated); `Concatenate2D` and `Stack2D` reject `Padded`.
+- `SparseMoE(normalize=True)` rescales the `k` chosen probabilities to sum to 1 (Shazeer 2017,
+  Mixtral); it needs `k >= 2`.
+- `SparseMoE.aux_loss`, the Switch Transformer load-balancing loss of the last forward pass, and
+  `load_balancing_loss(model)`, its sum over a model, for a custom `Step`.
+
+### Changed
+
+- A padder's output is a `Padded` batch, not a tensor. `Serial`, `Parallel`, the connectors,
+  `Collate`/`CollateParallel` and `Trainer` handle it as it is; `.shape` works as before. Code
+  that indexes or slices the padder's output reads `batch.values` (and `batch.mask`), and a model
+  class of your own receives the `Padded` batch in `forward`.
+- `MaskedMeanAggregator` raises `VectorMeshError` on a plain tensor: without a mask it cannot
+  tell padding from data. Pass a `Padded` batch, or `mask=`.
+- On a plain tensor `RNNAggregator`, `AttentionAggregator`, `Attention` and `TransformerBlock`
+  treat every position as real; no component reads padding from the values any more.
+- `SparseMoE` output at `k=1` is the chosen expert's output times its router probability, not
+  the expert's output alone; its dispatch does one host sync per forward pass instead of one per
+  expert.
+
 ## 0.17.0
 
 ### Fixed

@@ -9,7 +9,7 @@ from jaxtyping import Bool, Float, jaxtyped
 from torch import Tensor, nn
 
 from vectormesh.components.contracts import RankPolymorphicComponent
-from vectormesh.types import VectorMeshError
+from vectormesh.types import VectorMeshError, call_masked
 
 
 class Gate(RankPolymorphicComponent):
@@ -31,7 +31,8 @@ class Highway(RankPolymorphicComponent):
     """Highway network: G * T(x) + (1-G) * x, on the last axis at any rank.
 
     The transform must keep the width, ``(*lead, hidden_size) -> (*lead, hidden_size)``,
-    since its output is blended with the input.
+    since its output is blended with the input. On a `Padded` batch the transform gets
+    the mask too.
     """
 
     def __init__(self, transform: nn.Module, hidden_size: int):
@@ -43,12 +44,14 @@ class Highway(RankPolymorphicComponent):
 
     @jaxtyped(typechecker=beartype)
     def forward(
-        self, tensors: Float[Tensor, "*lead {self.hidden_size}"]
+        self,
+        tensors: Float[Tensor, "*lead {self.hidden_size}"],
+        mask: Bool[Tensor, "*mlead"] | None = None,
     ) -> Float[Tensor, "*lead {self.hidden_size}"]:
         # pre-norm (instead of post-norm) improves stability
         tensors = self.norm(tensors)
         gate = F.sigmoid(self.project(tensors))
-        transformed = self.transform(tensors)
+        transformed = call_masked(self.transform, tensors, mask)
         return gate * transformed + (1 - gate) * tensors
 
 
@@ -68,7 +71,9 @@ class MoE(RankPolymorphicComponent):
     (batch, seq, hidden) inputs: the same softmax-blend is applied along the
     last axis at every position.
 
-    Experts must map (..., hidden_size) to (..., out_size)
+    Experts must map (..., hidden_size) to (..., out_size). On a `Padded` batch an
+    expert that is a component gets the mask too, so `TransformerBlock` experts do
+    not attend to padding.
 
     Args:
         experts: modules mapping (..., hidden_size) -> (..., out_size).
@@ -88,12 +93,16 @@ class MoE(RankPolymorphicComponent):
 
     @jaxtyped(typechecker=beartype)
     def forward(
-        self, tensors: Float[Tensor, "*lead {self.hidden_size}"]
+        self,
+        tensors: Float[Tensor, "*lead {self.hidden_size}"],
+        mask: Bool[Tensor, "*mlead"] | None = None,
     ) -> Float[Tensor, "*lead {self.out_size}"]:
         # Per-position gates over experts; works for 2D and 3D alike.
         gates = F.softmax(self.router(tensors), dim=-1)  # (..., num_experts)
         # stack experts on dim -2: (..., num_experts, out_size)
-        expert_outputs = torch.stack([e(tensors) for e in self.experts], dim=-2)
+        expert_outputs = torch.stack(
+            [call_masked(e, tensors, mask) for e in self.experts], dim=-2
+        )
         # sum over experts weighted by gates: (..., out_size)
         return (gates.unsqueeze(-1) * expert_outputs).sum(dim=-2)
 
