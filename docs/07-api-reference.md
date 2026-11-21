@@ -38,7 +38,7 @@ MeanAggregator, MaskedMeanAggregator, AttentionAggregator, RNNAggregator, LastAg
 NeuralNet, Projection, Dense, Attention, TransformerBlock,
 Conv1D, Pool1D, Conv2D, Pool2D, GlobalPool2D, Recurrent,
 Concatenate2D, Concatenate3D, ConcatenateSequence, Stack2D,
-Gate, Highway, MoE, SparseMoE,
+Gate, Highway, MoE, SparseMoE, load_balancing_loss,
 GaussianNoise, Norm, Activation, RepresentationStd
 ```
 
@@ -275,7 +275,7 @@ Output folder name: `{YYYYMMDDHHMMSS}_{dataset_tag}_{column_name}`.
 | `Gate` | `RankPolymorphicComponent` | `(hidden_size: int)` | `(…, hidden)` → `(…, hidden)` |
 | `Highway` | `RankPolymorphicComponent` | `(transform: nn.Module, hidden_size: int)` | `(…, hidden)` → `(…, hidden)` |
 | `MoE` | `RankPolymorphicComponent` | `(experts: list[nn.Module], hidden_size: int, out_size: int)` | `(…, hidden)` → `(…, out)` |
-| `SparseMoE` | `RankPolymorphicComponent` | `(experts: Sequence[nn.Module], hidden_size: int, out_size: int, k: int = 1)` | `(…, hidden)` → `(…, out)` |
+| `SparseMoE` | `RankPolymorphicComponent` | `(experts: Sequence[nn.Module], hidden_size: int, out_size: int, k: int = 1, normalize: bool = False)`; `.aux_loss` after each forward | `(…, hidden)` → `(…, out)`; `forward(tensors, mask=None)` skips padded positions |
 | `GaussianNoise` | `RankPolymorphicComponent` | `(sigma: float = 0.1, relative: bool = True)` | `(…, D)` → `(…, D)`, train-only |
 
 A `Connector`'s `forward(tensors)` calls `connect(*tensors)`; the shape contract is on

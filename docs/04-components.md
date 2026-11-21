@@ -370,23 +370,39 @@ input each chunk gets its own expert mixture. Experts must map `(..., hidden_siz
 ### `SparseMoE(experts, hidden_size, out_size, k=1)`
 
 ```
-y = Σ_{i ∈ topk(W x)} softmax(topk logits)_i · expert_i(x)
+p = softmax(W x)                                  # over all N experts
+y = Σ_{i ∈ topk(p)} p_i · expert_i(x)             # normalize=False (default)
+y = Σ_{i ∈ topk(p)} p_i / Σ_{j ∈ topk(p)} p_j · expert_i(x)   # normalize=True
 ```
 
 A **sparse** mixture of experts: the router picks the top-`k` experts per example, each example
 is gathered into only those experts' input batches, and the outputs are scattered back weighted
-by a softmax over just the `k` chosen logits. An expert an example was not routed to never sees
-it, so parameters scale with the number of experts while compute per example scales with `k`.
-`k=1` is Switch-style routing (Fedus et al., 2021); `k>1` blends the top-`k` experts as in
-Shazeer et al. (2017). `k` must satisfy `1 <= k <= len(experts)`, otherwise `VectorMeshError`.
+by each chosen expert's probability under the softmax over all `N` logits. An expert an example
+was not routed to never sees it, so parameters scale with the number of experts while compute
+per example scales with `k`. `k=1` is Switch-style routing (Fedus et al., 2021): the weight `p_i`
+depends on the router, so the router learns which expert to pick. `normalize=True` rescales the
+`k` chosen probabilities to sum to 1, as in Shazeer et al. (2017) and Mixtral; it needs `k >= 2`,
+because at `k=1` the rescaled weight is always 1 and the router would get no gradient. `k` must
+satisfy `1 <= k <= len(experts)`, otherwise `VectorMeshError`.
 
 Same interface as `MoE`: any rank (leading dimensions are flattened into one routing axis and
-restored), and experts map `(..., hidden_size)` to `(..., out_size)`. There is no noisy gating and
-no load-balancing loss, so nothing keeps the router from concentrating on a few experts.
+restored), and experts map `(..., hidden_size)` to `(..., out_size)`. Inside a `Serial` on a
+`Padded` batch (§4.1) padded positions are not routed: no expert runs on them and their output is
+zero.
+
+**Load balancing.** Nothing in the task loss keeps the router from sending everything to a few
+experts. After every forward pass `moe.aux_loss` holds the Switch Transformer load-balancing
+loss `N · Σ_i f_i · P_i` (`f_i` the fraction of assignments to expert `i`, `P_i` its mean router
+probability): 1 for uniform routing, up to `N` when one expert gets everything. It is opt-in:
+add it in a custom `Step` (§6.6), with `load_balancing_loss(model)` summing it over every
+`SparseMoE` in the model. Fedus et al. use a weight of 0.01.
 
 ```python
 experts = [NeuralNet([hidden_size, 128], hidden_size) for _ in range(8)]
-SparseMoE(experts, hidden_size=hidden_size, out_size=hidden_size, k=2)
+moe = SparseMoE(experts, hidden_size=hidden_size, out_size=hidden_size, k=2)
+
+def step(model, x, y):
+    return loss_fn(model(x), y) + 0.01 * load_balancing_loss(model)
 ```
 
 ---

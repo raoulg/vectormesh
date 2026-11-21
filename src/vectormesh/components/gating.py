@@ -5,7 +5,7 @@ from collections.abc import Sequence
 import torch
 import torch.nn.functional as F
 from beartype import beartype
-from jaxtyping import Float, jaxtyped
+from jaxtyping import Bool, Float, jaxtyped
 from torch import Tensor, nn
 
 from vectormesh.components.contracts import RankPolymorphicComponent
@@ -100,30 +100,37 @@ class MoE(RankPolymorphicComponent):
 
 class SparseMoE(RankPolymorphicComponent):
     """Sparse (top-k) mixture of experts: each example activates only its top-k
-    experts, and -- unlike `MoE` above -- only those experts actually run on it.
+    experts, and only those experts run on it.
 
     `MoE` is the Jacobs & Jordan (1991) formulation: every expert runs on every
     input and the outputs are softmax-blended, so compute per example is `O(N)` in
-    the number of experts regardless of how many are actually useful for that
-    example. `SparseMoE` is the Shazeer et al. (2017, *Outrageously Large Neural
-    Networks*) / Switch Transformer (Fedus et al., 2021) formulation: the router
-    picks the top-`k` experts per example, each example is *gathered* into only
-    those experts' input batches, and the outputs are *scattered* back weighted by
-    the (renormalised, over just the top-k) softmax score. An expert an example did
-    not route to never sees that example's tensor -- there is no "compute
-    everything then mask" step, which would still cost `O(N)` and defeat the point.
+    the number of experts. `SparseMoE` is the Shazeer et al. (2017, *Outrageously
+    Large Neural Networks*) / Switch Transformer (Fedus et al., 2021) formulation:
+    the router picks the top-`k` experts per example, each example is *gathered*
+    into only those experts' input batches, and the outputs are *scattered* back.
+    An expert an example did not route to never sees that example's tensor.
 
-    That gather/scatter is what decouples capacity from compute: total parameters
-    scale with `N` (add experts freely), compute per example scales with `k`
-    (usually 1 or 2), so a model can hold far more capacity than it spends compute
-    on any single input. `k=1` is Switch-style (one expert per example, the simplest
-    and cheapest routing); `k>1` blends the top-`k` experts, as in Shazeer 2017 and
-    Mixtral.
+    Each chosen expert's output is weighted by its probability under the softmax
+    over all `N` router logits, as in the Switch Transformer. That probability
+    depends on the router weights also at `k=1`, so the router learns. With
+    ``normalize=True`` the `k` chosen probabilities are rescaled to sum to 1, as in
+    Shazeer et al. (2017) and Mixtral; at `k=1` that weight is always 1 and the
+    router would get no gradient, so ``normalize=True`` needs ``k >= 2``.
+
+    After every forward pass `aux_loss` holds the Switch Transformer
+    load-balancing loss, ``N * sum_i f_i * P_i``: `f_i` is the fraction of routing
+    assignments that went to expert `i`, `P_i` the mean router probability of
+    expert `i`. It is 1 when routing is uniform and grows as the router
+    concentrates on few experts. Nothing adds it to the training loss on its own;
+    `load_balancing_loss(model)` sums it over every `SparseMoE` in a model, for a
+    custom `Step`.
 
     Experts must map (..., hidden_size) to (..., out_size); the router looks at the
     last dim. Accepts any leading shape -- `(batch, hidden)` or `(batch, seq,
     hidden)` -- by flattening every leading dim into one routing axis and restoring
-    it afterwards.
+    it afterwards. With a `mask` (True for real positions, as a `Padded` batch
+    carries it), padded positions are not routed: no expert runs on them, they
+    count towards neither `f_i` nor `P_i`, and their output is zero.
 
     Args:
         experts: modules mapping (..., hidden_size) -> (..., out_size).
@@ -131,6 +138,7 @@ class SparseMoE(RankPolymorphicComponent):
         out_size: output dimensionality of each expert.
         k: number of experts activated per example (default 1, Switch-style). Must
             be between 1 and `len(experts)`.
+        normalize: rescale the `k` chosen probabilities to sum to 1. Needs `k >= 2`.
     """
 
     def __init__(
@@ -139,6 +147,7 @@ class SparseMoE(RankPolymorphicComponent):
         hidden_size: int,
         out_size: int,
         k: int = 1,
+        normalize: bool = False,
     ) -> None:
         super().__init__()
         experts = list(experts)
@@ -150,59 +159,85 @@ class SparseMoE(RankPolymorphicComponent):
                 "it has to be at least 1 and cannot exceed N.",
                 fix=f"pass 1 <= k <= {len(experts)}.",
             )
+        if normalize and k == 1:
+            raise VectorMeshError(
+                "normalize=True with k=1 gives every example the weight 1, so the "
+                "router would receive no gradient and never learn.",
+                hint="normalize rescales the k chosen router probabilities to sum "
+                "to 1; with one chosen expert that sum is the probability itself.",
+                fix="pass normalize=False (Switch-style) for k=1, or k >= 2.",
+            )
         self.experts = nn.ModuleList(experts)
         self.router = nn.Linear(hidden_size, len(experts))
         self.hidden_size = hidden_size
         self.out_size = out_size
         self.num_experts = len(experts)
         self.k = k
+        self.normalize = normalize
+        self.aux_loss: Tensor = torch.zeros(())
 
     @jaxtyped(typechecker=beartype)
     def forward(
-        self, tensors: Float[Tensor, "*lead {self.hidden_size}"]
+        self,
+        tensors: Float[Tensor, "*lead {self.hidden_size}"],
+        mask: Bool[Tensor, "*lead"] | None = None,
     ) -> Float[Tensor, "*lead {self.out_size}"]:
         leading_shape = tensors.shape[:-1]
-        flat = tensors.reshape(-1, self.hidden_size)  # (n, hidden) -- one routing axis
-        n = flat.shape[0]
+        flat = tensors.reshape(-1, self.hidden_size)  # (n, hidden): one routing axis
+        output = flat.new_zeros(flat.shape[0], self.out_size)
+        if mask is None:
+            real = None
+            routed = flat
+        else:
+            real = mask.reshape(-1).nonzero(as_tuple=True)[0]
+            routed = flat[real]
+        n = routed.shape[0]
+        if n == 0:
+            self.aux_loss = flat.new_zeros(())
+            return output.reshape(*leading_shape, self.out_size)
 
-        logits = self.router(flat)  # (n, num_experts)
-        topk_logits, topk_idx = logits.topk(self.k, dim=-1)  # (n, k) each
-        # renormalise over just the top-k, not the full softmax over all N experts --
-        # that is what keeps the weights a distribution while only touching k logits.
-        topk_weights = F.softmax(topk_logits, dim=-1)
+        probs = F.softmax(self.router(routed), dim=-1)  # (n, num_experts)
+        topk_probs, topk_idx = probs.topk(self.k, dim=-1)  # (n, k) each
+        if self.normalize:
+            topk_probs = topk_probs / topk_probs.sum(dim=-1, keepdim=True)
 
-        # Flatten the (n, k) routing decisions into n*k independent (example, expert,
-        # weight) assignments, one per example-slot pair, then sort by expert id so
-        # every expert's assignments become one contiguous slice. This is what keeps
-        # the loop below cheap as num_experts grows: the per-expert cost is a slice
-        # (free) plus one matmul over exactly its assigned rows, not an O(num_experts)
-        # scan of the whole batch looking for that expert's hits every iteration.
+        # n*k (example, expert, weight) assignments, sorted by expert so that every
+        # expert's assignments are one contiguous slice.
         assigned_expert = topk_idx.reshape(-1)  # (n*k,)
-        assigned_weight = topk_weights.reshape(-1)  # (n*k,)
-        assigned_example = (
-            torch.arange(n, device=tensors.device)
-            .unsqueeze(1)
-            .expand(-1, self.k)
-            .reshape(-1)
-        )  # (n*k,) -- which original row each assignment belongs to
-
-        sort_order = assigned_expert.argsort()
-        sorted_example = assigned_example[sort_order]
-        sorted_weight = assigned_weight[sort_order]
-
+        sort_order = assigned_expert.argsort(stable=True)
+        sorted_example = sort_order // self.k  # the routed row each assignment reads
+        sorted_weight = topk_probs.reshape(-1)[sort_order].unsqueeze(-1)
         counts = torch.bincount(assigned_expert, minlength=self.num_experts)
-        offsets = torch.cat([counts.new_zeros(1), counts.cumsum(0)])
 
-        output = flat.new_zeros(n, self.out_size)
-        # only experts that actually received an assignment this batch ever run --
-        # an expert with count 0 never appears in this loop at all.
-        for expert_id in counts.nonzero(as_tuple=True)[0].tolist():
-            start, end = int(offsets[expert_id]), int(offsets[expert_id + 1])
-            example_idx = sorted_example[start:end]
-            weight = sorted_weight[start:end].unsqueeze(-1)
-            # gather: only the examples routed to this expert ever enter it
-            gathered = self.experts[expert_id](flat[example_idx])
-            # scatter-add: accumulate weighted expert output back at each example's row
-            output.index_add_(0, example_idx, gathered * weight)
+        # one host sync for all experts; an expert with no assignment never runs
+        sizes = counts.tolist()
+        mixed = routed.new_zeros(n, self.out_size)
+        for expert, example_idx, weight in zip(
+            self.experts, sorted_example.split(sizes), sorted_weight.split(sizes)
+        ):
+            if example_idx.numel():
+                # gather the rows routed to this expert, scatter-add its weighted output
+                mixed.index_add_(0, example_idx, expert(routed[example_idx]) * weight)
 
+        fraction = counts.to(probs.dtype) / (n * self.k)
+        self.aux_loss = self.num_experts * (fraction * probs.mean(dim=0)).sum()
+
+        if real is None:
+            output = mixed
+        else:
+            output = output.index_copy(0, real, mixed)
         return output.reshape(*leading_shape, self.out_size)
+
+
+def load_balancing_loss(model: nn.Module) -> Tensor:
+    """The sum of `aux_loss` over every `SparseMoE` in `model`, from its last
+    forward pass: the Switch Transformer load-balancing loss, for a custom `Step`.
+
+    >>> step = lambda model, x, y: loss_fn(model(x), y) + 0.01 * load_balancing_loss(model)
+
+    Fedus et al. (2021) use a weight of 0.01. A model without a `SparseMoE` gives 0.
+    """
+    losses = [m.aux_loss for m in model.modules() if isinstance(m, SparseMoE)]
+    if not losses:
+        return torch.zeros(())
+    return torch.stack(losses).sum()

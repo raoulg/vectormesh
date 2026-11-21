@@ -19,7 +19,7 @@ from .contracts import (
     SlidingComponent,
 )
 from .convolution import Conv1D, Conv2D, GlobalPool2D, Pool1D, Pool2D
-from .gating import Gate, Highway, MoE, SparseMoE
+from .gating import Gate, Highway, MoE, SparseMoE, load_balancing_loss
 from .metrics import RepresentationStd
 from .neural import Attention, Dense, NeuralNet, Projection, TransformerBlock
 from .normalization import Norm, NormKind
@@ -72,4 +72,5 @@ __all__ = [
     "SparseMoE",
     "Stack2D",
     "TransformerBlock",
+    "load_balancing_loss",
 ]

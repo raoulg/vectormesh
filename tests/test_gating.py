@@ -11,10 +11,10 @@ shape-only test just as easily as a real gather/scatter one.
 
 import pytest
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
-from vectormesh.components.gating import MoE, SparseMoE
+from vectormesh.components.gating import MoE, SparseMoE, load_balancing_loss
 from vectormesh.types import VectorMeshError
 
 
@@ -59,20 +59,96 @@ def test_output_shape_2d_and_3d():
     assert out3d.shape == (2, 7, 6)
 
 
-def test_k1_output_exactly_matches_the_single_routed_expert():
-    """With k=1 the softmax over a single logit is always 1.0, so the output must
-    equal the chosen expert's raw output -- no blending, no scaling."""
+def test_k1_output_is_the_routed_expert_weighted_by_its_probability():
+    """With k=1 the output is the chosen expert's output times that expert's
+    probability under the softmax over all N router logits (Switch Transformer)."""
     torch.manual_seed(0)
     moe = SparseMoE(experts=make_experts(4, 8, 8), hidden_size=8, out_size=8, k=1)
     x = torch.randn(16, 8)
     with torch.no_grad():
-        logits = moe.router(x)
-        chosen = logits.argmax(dim=-1)
+        probs = F.softmax(moe.router(x), dim=-1)
+        chosen = probs.argmax(dim=-1)
         expected = torch.stack(
-            [moe.experts[chosen[i]](x[i]) for i in range(x.shape[0])]
+            [probs[i, c] * moe.experts[c](x[i]) for i, c in enumerate(chosen.tolist())]
         )
         actual = moe(x)
     assert torch.allclose(actual, expected, atol=1e-6)
+
+
+def test_router_gets_a_gradient_at_k1():
+    """At k=1 the router must learn: its weights get a nonzero gradient, and an
+    optimizer step moves them."""
+    torch.manual_seed(7)
+    moe = SparseMoE(experts=make_experts(4, 8, 8), hidden_size=8, out_size=8, k=1)
+    x, target = torch.randn(32, 8), torch.randn(32, 8)
+    before = moe.router.weight.detach().clone()
+    optimizer = torch.optim.SGD(moe.parameters(), lr=0.1)
+    F.mse_loss(moe(x), target).backward()
+    assert moe.router.weight.grad is not None
+    assert moe.router.weight.grad.abs().max() > 0
+    optimizer.step()
+    assert (moe.router.weight - before).abs().max() > 0
+
+
+def test_normalize_rescales_the_chosen_probabilities():
+    torch.manual_seed(6)
+    experts = [nn.Linear(8, 8, bias=False) for _ in range(5)]
+    for e in experts:
+        nn.init.eye_(e.weight)  # every expert is the identity: output = weight sum * x
+    moe = SparseMoE(experts=experts, hidden_size=8, out_size=8, k=3, normalize=True)
+    x = torch.randn(7, 8)
+    with torch.no_grad():
+        assert torch.allclose(moe(x), x, atol=1e-6)  # the 3 weights sum to 1
+    plain = SparseMoE(experts=experts, hidden_size=8, out_size=8, k=3)
+    plain.router.load_state_dict(moe.router.state_dict())
+    with torch.no_grad():
+        top3 = F.softmax(plain.router(x), dim=-1).topk(3, dim=-1).values.sum(-1)
+        assert torch.allclose(plain(x), x * top3.unsqueeze(-1), atol=1e-6)
+
+
+def test_normalize_with_k1_is_rejected():
+    with pytest.raises(VectorMeshError, match="normalize"):
+        SparseMoE(make_experts(4, 8, 8), hidden_size=8, out_size=8, normalize=True)
+
+
+def test_aux_loss_is_one_for_uniform_routing_and_grows_when_concentrated():
+    moe = SparseMoE(make_experts(4, 8, 8), hidden_size=8, out_size=8, k=1)
+    x = torch.randn(64, 8)
+    with torch.no_grad():
+        moe.router.weight.zero_()
+        moe.router.bias.copy_(torch.tensor([0.0, 0.0, 0.0, 0.0]))
+        moe(x)  # equal probabilities; ties route to expert 0, so f = (1, 0, 0, 0)
+        assert torch.isclose(moe.aux_loss, torch.tensor(1.0))
+        moe.router.bias.copy_(torch.tensor([5.0, 0.0, 0.0, 0.0]))
+        moe(x)  # everything to expert 0 with high probability
+        assert moe.aux_loss > 3.0
+
+
+def test_aux_loss_is_differentiable_and_summed_by_load_balancing_loss():
+    torch.manual_seed(8)
+    inner = SparseMoE(make_experts(4, 8, 8), hidden_size=8, out_size=8, k=2)
+    other = SparseMoE(make_experts(3, 8, 8), hidden_size=8, out_size=8)
+    model = nn.Sequential(inner, other)
+    model(torch.randn(16, 8))
+    total = load_balancing_loss(model)
+    assert torch.isclose(total, inner.aux_loss + other.aux_loss)
+    total.backward()
+    assert inner.router.weight.grad is not None
+    assert inner.router.weight.grad.abs().max() > 0
+    assert load_balancing_loss(nn.Linear(2, 2)) == 0
+
+
+def test_mask_skips_padded_positions():
+    torch.manual_seed(9)
+    experts = make_experts(4, 8, 8, counting=True)
+    moe = SparseMoE(experts, hidden_size=8, out_size=8, k=1)
+    x = torch.randn(2, 5, 8)
+    mask = torch.tensor([[True] * 5, [True, True, False, False, False]])
+    with torch.no_grad():
+        out = moe(x, mask=mask)
+        assert torch.allclose(out[mask], moe(x[mask]), atol=1e-6)
+    assert (out[~mask] == 0).all()
+    assert sum(sum(e.seen_batch_sizes) for e in experts) == 2 * 7  # two calls, 7 rows
 
 
 def test_only_routed_experts_are_ever_called():
@@ -180,22 +256,3 @@ def test_gradients_reach_router_and_routed_experts():
     assert moe.router.weight.grad is not None
     assert not torch.all(moe.router.weight.grad == 0)
     assert x.grad is not None
-
-
-def test_topk_weights_sum_to_one_per_example():
-    """Renormalisation check: softmax(topk_logits) sums to 1 across the k chosen
-    experts for every example, independent of how many experts exist in total."""
-    torch.manual_seed(6)
-    hidden = 8
-    moe = SparseMoE(
-        experts=[nn.Linear(hidden, hidden) for _ in range(5)],
-        hidden_size=hidden,
-        out_size=hidden,
-        k=3,
-    )
-    x = torch.randn(7, hidden)
-    with torch.no_grad():
-        logits = moe.router(x)
-        topk_logits, _ = logits.topk(3, dim=-1)
-        weights = F.softmax(topk_logits, dim=-1)
-    assert torch.allclose(weights.sum(dim=-1), torch.ones(7), atol=1e-6)
