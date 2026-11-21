@@ -3,7 +3,7 @@ from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Protocol, TypeVar, runtime_checkable
+from typing import Any, Protocol, TypeVar, runtime_checkable
 
 import torch
 from jaxtyping import Float, Shaped
@@ -89,6 +89,14 @@ def _timestamped_dir(log_dir: Path | None = None) -> Path:
     log_dir = Path(log_dir) if log_dir is not None else Path(".")
     timestamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
     return log_dir / f"{timestamp}-{uuid.uuid4().hex[:6]}"
+
+
+def _concat(batches: list[Any]) -> Any:
+    """Concatenate per-batch outputs along the batch axis, also inside tuples."""
+    first = batches[0]
+    if isinstance(first, tuple):
+        return tuple(_concat([b[i] for b in batches]) for i in range(len(first)))
+    return torch.cat(batches, dim=0)
 
 
 @dataclass
@@ -284,57 +292,67 @@ class Trainer:
         return replace(self.best_result, stopped_epoch=result.epoch)
 
     def trainbatches(self) -> float:
+        """Train for `settings.train_steps` batches.
+
+        Returns the mean loss per example: each batch's loss (a mean over its
+        examples) counts as many times as the batch has examples, so a short last
+        batch weighs what its examples weigh.
+        """
         self.model.train()
-        train_loss: float = 0.0
-        train_steps = self.settings.train_steps
-        for _ in self._bar(range(train_steps), colour="#1e4706"):
+        loss_sum: float = 0.0
+        examples = 0
+        for _ in self._bar(range(self.settings.train_steps), colour="#1e4706"):
             x, y = self._next_batch(self.traindataloader, "_train_iter")
             x, y = self._to_device(x, y)
             self.optimizer.zero_grad()
             loss = self.step(self.model, x, y)
             loss.backward()
             self.optimizer.step()
-            train_loss += float(loss.cpu().detach())
-        train_loss /= train_steps
-
-        return train_loss
+            loss_sum += float(loss.cpu().detach()) * len(y)
+            examples += len(y)
+        return loss_sum / examples
 
     def evalbatches(self) -> tuple[dict[str, float], float]:
-        """Evaluate model on validation data with proper device handling"""
-        self.model.eval()
-        valid_steps = self.settings.valid_steps
-        test_loss: float = 0.0
-        metric_dict: dict[str, float] = {}
+        """Evaluate the model on `settings.valid_steps` validation batches.
 
-        with torch.no_grad():  # Prevent gradient computation during evaluation
-            for _ in range(valid_steps):
+        The loss is the mean per example, weighted as in `trainbatches`. Every
+        metric is computed once, on the targets and predictions of all validation
+        batches concatenated, so it is exact also for metrics that are not a mean
+        over examples (F1) and when the last batch is shorter.
+        """
+        self.model.eval()
+        loss_sum: float = 0.0
+        examples = 0
+        targets: list[TargetTensor] = []
+        predictions: list[Any] = []
+
+        with torch.no_grad():
+            for _ in range(self.settings.valid_steps):
                 x, y = self._next_batch(self.validdataloader, "_valid_iter")
                 x, y = self._to_device(x, y)
 
                 if self._custom_step is None:
                     # one forward pass serves both the loss and the metrics
                     yhat = self.model(x)
-                    test_loss += float(self.loss_fn(yhat, y).cpu())
-                    for m in self.settings.metrics:
-                        metric_dict[str(m)] = metric_dict.get(str(m), 0.0) + m(y, yhat)
+                    loss = self.loss_fn(yhat, y)
                 else:
-                    test_loss += float(self.step(self.model, x, y).cpu())
-                    if self.settings.metrics:
-                        # a custom step doesn't expose its own yhat, so metrics
-                        # here cost a second forward pass -- only pay it when
-                        # metrics are actually requested alongside a custom step
-                        yhat = self.model(x)
-                        for m in self.settings.metrics:
-                            metric_dict[str(m)] = metric_dict.get(str(m), 0.0) + m(
-                                y, yhat
-                            )
+                    loss = self.step(self.model, x, y)
+                    # a custom step doesn't expose its own yhat, so metrics here
+                    # cost a second forward pass, paid only when metrics are asked
+                    yhat = self.model(x) if self.settings.metrics else None
+                loss_sum += float(loss.cpu()) * len(y)
+                examples += len(y)
+                if self.settings.metrics:
+                    targets.append(y)
+                    predictions.append(yhat)
 
-        # Average the results
-        test_loss /= valid_steps
-        for key, value in metric_dict.items():
-            metric_dict[key] = value / valid_steps
+        test_loss = loss_sum / examples
+        metric_dict: dict[str, float] = {}
+        if self.settings.metrics:
+            y_all, yhat_all = _concat(targets), _concat(predictions)
+            for m in self.settings.metrics:
+                metric_dict[str(m)] = m(y_all, yhat_all)
 
-        # Handle scheduler
         if self.scheduler:
             if self.scheduler.__class__.__name__ == "ReduceLROnPlateau":
                 self.scheduler.step(test_loss)

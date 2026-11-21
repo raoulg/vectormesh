@@ -411,3 +411,71 @@ def test_early_stopping_counts_delta_as_no_improvement(tmp_path):
 
 def test_trainresult_stopped_epoch_defaults_to_epoch():
     assert TrainResult(3, 0.1, 0.2).stopped_epoch == 3
+
+
+def _uneven_trainer(
+    tmp_path, metrics: list
+) -> tuple[Trainer, torch.Tensor, torch.Tensor]:
+    """100 examples in batches of 32, 32, 32 and 4, for train and validation."""
+    torch.manual_seed(11)
+    x = torch.randn(100, 4)
+    y = torch.nn.functional.one_hot(torch.randint(0, 2, (100,)), 2).float()
+    loader = DataLoader(TensorDataset(x, y), batch_size=32, shuffle=False)
+    settings = _settings(
+        tmp_path, metrics=metrics, train_steps=len(loader), valid_steps=len(loader)
+    )
+    trainer = Trainer(
+        model=nn.Linear(4, 2),
+        settings=settings,
+        loss_fn=nn.CrossEntropyLoss(),
+        optimizer=torch.optim.Adam,
+        traindataloader=loader,
+        validdataloader=loader,
+        progress=False,
+    )
+    return trainer, x, y
+
+
+def test_eval_metrics_and_loss_are_exact_with_an_uneven_last_batch(tmp_path):
+    from vectormesh.components.metrics import Accuracy, F1Score
+
+    trainer, x, y = _uneven_trainer(tmp_path, [Accuracy(), F1Score("macro")])
+    metric_dict, test_loss = trainer.evalbatches()
+    with torch.no_grad():
+        yhat = trainer.model(x)
+    assert metric_dict["Accuracy"] == pytest.approx(Accuracy()(y, yhat))
+    assert metric_dict["F1-macro"] == pytest.approx(F1Score("macro")(y, yhat))
+    assert test_loss == pytest.approx(float(nn.CrossEntropyLoss()(yhat, y)))
+
+
+def test_train_loss_is_a_mean_per_example(tmp_path):
+    trainer, x, y = _uneven_trainer(tmp_path, [])
+    trainer.optimizer = torch.optim.SGD(trainer.model.parameters(), lr=0.0)
+    train_loss = trainer.trainbatches()
+    with torch.no_grad():
+        full = float(nn.CrossEntropyLoss()(trainer.model(x), y))
+    assert train_loss == pytest.approx(full)
+
+
+def test_metrics_reach_tuple_outputs_concatenated(tmp_path):
+    """A model that returns a tuple gets each element concatenated over batches."""
+    seen: list[tuple[int, ...]] = []
+
+    def shapes(y, yhat) -> float:
+        seen.append(tuple(t.shape[0] for t in yhat))
+        return 0.0
+
+    class TwoHeads(nn.Module):
+        def __init__(self, inner: nn.Module):
+            super().__init__()
+            self.inner = inner
+
+        def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+            out = self.inner(x)
+            return out, out[:, :1]
+
+    trainer, _, _ = _uneven_trainer(tmp_path, [shapes])
+    trainer.model = TwoHeads(trainer.model)
+    trainer.loss_fn = lambda yhat, y: nn.functional.cross_entropy(yhat[0], y)
+    trainer.evalbatches()
+    assert seen == [(100, 100)]

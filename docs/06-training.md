@@ -124,6 +124,10 @@ settings = TrainerSettings(
 ```
 
 - `train_steps` / `valid_steps` — batches per epoch; use `len(loader)` for a full pass.
+  `train_loss` and `test_loss` are means per example: a batch's loss counts as many times as it
+  has examples, so a short last batch weighs no more than its examples. Every metric is computed
+  once per epoch on the targets and predictions of all `valid_steps` batches together, so
+  `Accuracy` and `F1Score` are exactly what they would be on the whole validation set at once.
 - `earlystop_kwargs` — **required, no default.** Pass `None` to train the full epoch count, or a
   dict of `EarlyStopping` kwargs. Whether a run stops early changes the number you report,
   non-obviously enough that `TrainerSettings` won't let you leave it unstated. With early stopping
@@ -225,7 +229,8 @@ trainer = Trainer(..., step=contrastive_step)
 `test_loss` — and everything downstream of it, early stopping, the LR scheduler, every `Reporter`
 — stays coherent no matter which one is in use.
 
-What `step` does **not** make pluggable is `metrics`: `metric_dict[str(m)] = m(y, yhat)` still
+What `step` does **not** make pluggable is `metrics`: `metric_dict[str(m)] = m(y, yhat)`, on all
+validation batches concatenated, still
 assumes a plain `model(x)` produces something worth scoring against `y`. A contrastive pair over
 two views usually has no such `yhat` — pass `metrics=[]` in that case. Combining a custom `step`
 with non-empty `metrics` costs a second forward pass (metrics call `model(x)` on their own, since
