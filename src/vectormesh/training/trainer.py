@@ -3,7 +3,7 @@ from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Protocol, TypeVar, runtime_checkable
+from typing import Any, Literal, Protocol, TypeVar, runtime_checkable
 
 import torch
 from jaxtyping import Float, Shaped
@@ -11,7 +11,7 @@ from loguru import logger
 from torch.optim import Optimizer
 from tqdm import tqdm
 
-from vectormesh.types import Padded
+from vectormesh.types import Padded, VectorMeshError
 
 from .settings import TrainerSettings
 
@@ -111,7 +111,8 @@ class TrainResult:
 
     `epoch`, `train_loss`, `test_loss` and `metric_dict` describe the epoch
     whose model `trainer.model` holds after the loop: with early stopping on,
-    the epoch with the lowest validation loss; without it, the last epoch.
+    the best epoch by the monitored quantity (the validation loss unless
+    `earlystop_kwargs` names a metric); without it, the last epoch.
     `stopped_epoch` is the last epoch that ran: `patience` epochs after
     `epoch` when early stopping stopped the loop, and equal to `epoch`
     whenever the last epoch was also the best one.
@@ -205,6 +206,17 @@ class Trainer:
             self.early_stopping: EarlyStopping | None = EarlyStopping(
                 self.log_dir, **settings.earlystop_kwargs
             )
+            monitor = self.early_stopping.monitor
+            names = [str(m) for m in settings.metrics]
+            if monitor != TEST_LOSS and monitor not in names:
+                raise VectorMeshError(
+                    f"earlystop_kwargs monitor={monitor!r} is not a metric of this "
+                    f"Trainer; its metrics are {names}.",
+                    hint="monitor names 'test_loss' or a metric in metric_dict, "
+                    "keyed by the metric's str().",
+                    fix=f"pass one of {[TEST_LOSS, *names]}, or add the metric to "
+                    "TrainerSettings.metrics.",
+                )
         else:
             self.early_stopping = None
 
@@ -259,7 +271,8 @@ class Trainer:
         """Train for `settings.epochs` epochs, or until early stopping stops.
 
         With early stopping on, the model's weights are copied in memory at
-        every epoch that improves the validation loss, and after the loop
+        every epoch that improves the monitored quantity (``monitor`` in
+        `earlystop_kwargs`: the validation loss, or a metric), and after the loop
         `self.model` holds the weights of the best epoch, whether the loop
         stopped early or ran the full budget. The returned `TrainResult`
         describes that epoch, and its `stopped_epoch` the last one that ran.
@@ -278,7 +291,9 @@ class Trainer:
             result = TrainResult(resolved_epoch, train_loss, test_loss, metric_dict)
 
             if self.early_stopping is not None:
-                self.early_stopping(test_loss, self.model)
+                monitor = self.early_stopping.monitor
+                value = test_loss if monitor == TEST_LOSS else metric_dict[monitor]
+                self.early_stopping(value, self.model)
                 if self.early_stopping.improved:
                     self.best_result = result
                 if self.early_stopping.early_stop:
@@ -293,7 +308,7 @@ class Trainer:
         self.model.load_state_dict(self.early_stopping.best_state)
         logger.info(
             f"Restored the model of epoch {self.best_result.epoch} "
-            f"(test loss {self.best_result.test_loss:.4f}); "
+            f"({self.early_stopping.monitor} {self.early_stopping.best_value:.4f}); "
             f"training stopped at epoch {result.epoch}."
         )
         return replace(self.best_result, stopped_epoch=result.epoch)
@@ -400,6 +415,12 @@ class Trainer:
         return epoch
 
 
+#: the name `EarlyStopping` monitors by default: the validation loss
+TEST_LOSS = "test_loss"
+
+Mode = Literal["min", "max"]
+
+
 class EarlyStopping:
     def __init__(
         self,
@@ -408,30 +429,57 @@ class EarlyStopping:
         verbose: bool = False,
         delta: float = 0.0,
         save: bool = False,
+        monitor: str = TEST_LOSS,
+        mode: Mode | None = None,
     ) -> None:
-        """Track the validation loss and keep the weights of the best epoch.
+        """Track one validation quantity and keep the weights of the best epoch.
 
-        Every call that improves the best loss copies the model's
+        Every call that improves the best value copies the model's
         `state_dict` into `best_state` (in memory, on the model's device) and
         sets `improved`; `patience` calls in a row without improvement set
         `early_stop`.
 
         Args:
             log_dir (Path): location to save checkpoint to.
-            patience (int): How long to wait after last time validation loss improved.
-                            Default: 7
-            verbose (bool): If True, prints a message for each validation loss
-            improvement. Default: False
-            delta (float): Minimum change in the monitored quantity to qualify as
-            an improvement. Default: 0.0
+            patience (int): How many epochs in a row without improvement end
+                training. Default: 7
+            verbose (bool): If True, logs every improvement. Default: False
+            delta (float): Minimum improvement in the monitored direction: in
+                ``"min"`` mode a value counts when it is below the best by more
+                than ``delta``, in ``"max"`` mode when it is above the best by
+                more than ``delta``. Default: 0.0
             save (bool): If True, also write the whole model to
-            `log_dir / "checkpoint.pt"` on every improvement, for `get_best`.
-            Default: False
+                `log_dir / "checkpoint.pt"` on every improvement, for `get_best`.
+                Default: False
+            monitor (str): what to watch: ``"test_loss"``, the validation loss
+                (default), or the name of a metric in `metric_dict`, which is
+                its ``str()``, e.g. ``"Accuracy"`` or ``"F1-micro"``.
+            mode (str): ``"min"`` when lower is better, ``"max"`` when higher
+                is. Defaults to ``"min"`` for ``"test_loss"``; a metric needs it
+                stated, since a metric's name does not say which way is better.
         """
+        if mode is None:
+            if monitor != TEST_LOSS:
+                raise VectorMeshError(
+                    f"EarlyStopping(monitor={monitor!r}) needs mode='min' or "
+                    "mode='max'.",
+                    hint="whether a higher value of a metric is better is not part "
+                    "of its name; only the validation loss has a default (min).",
+                    fix=f"pass mode='max' for a score such as accuracy or F1, "
+                    f"mode='min' for an error such as MAE: "
+                    f"{{'monitor': {monitor!r}, 'mode': 'max', ...}}",
+                )
+            mode = "min"
+        if mode not in ("min", "max"):
+            raise VectorMeshError(
+                f"EarlyStopping mode must be 'min' or 'max', got {mode!r}."
+            )
         self.patience = patience
         self.verbose = verbose
         self.counter = 0
-        self.best_loss: float | None = None
+        self.monitor = monitor
+        self.mode: Mode = mode
+        self.best_value: float | None = None
         self.best_state: dict[str, torch.Tensor] | None = None
         self.improved = False
         self.early_stop = False
@@ -439,33 +487,40 @@ class EarlyStopping:
         self.path = Path(log_dir) / "checkpoint.pt"
         self.save = save
 
-    def __call__(self, val_loss: float, model: torch.nn.Module) -> None:
-        # we minimize loss: a loss that does not beat the best by more than
-        # delta is not an improvement. The first call always is.
-        self.improved = self.best_loss is None or val_loss + self.delta < self.best_loss
+    def _is_improvement(self, value: float) -> bool:
+        if self.best_value is None:
+            return True
+        if self.mode == "min":
+            return value < self.best_value - self.delta
+        return value > self.best_value + self.delta
+
+    def __call__(self, value: float, model: torch.nn.Module) -> None:
+        """Record this epoch's value of the monitored quantity. The first call
+        is always an improvement."""
+        self.improved = self._is_improvement(value)
         if self.improved:
             self.best_state = {
                 k: v.detach().clone() for k, v in model.state_dict().items()
             }
             if self.save:
-                self.save_checkpoint(val_loss, model)
-            self.best_loss = val_loss
+                self.save_checkpoint(value, model)
+            self.best_value = value
             self.counter = 0
         else:
             self.counter += 1
             logger.info(
-                f"best loss: {self.best_loss:.4f}, current loss {val_loss:.4f}."
+                f"best {self.monitor}: {self.best_value:.4f}, current {value:.4f}. "
                 f"Counter {self.counter}/{self.patience}."
             )
             if self.counter >= self.patience:
                 self.early_stop = True
 
-    def save_checkpoint(self, val_loss: float, model: torch.nn.Module) -> None:
-        """Saves model when validation loss decrease."""
+    def save_checkpoint(self, value: float, model: torch.nn.Module) -> None:
+        """Write the whole model to `path`, on an improvement of the monitored value."""
         if self.verbose:
-            best = "inf" if self.best_loss is None else f"{self.best_loss:.4f}"
+            best = "none" if self.best_value is None else f"{self.best_value:.4f}"
             logger.info(
-                f"Validation loss ({best} --> {val_loss:.4f}). Saving {self.path} ..."
+                f"{self.monitor} ({best} --> {value:.4f}). Saving {self.path} ..."
             )
         # The only place a Trainer run creates a directory on disk, and only
         # when save=True and a checkpoint is actually about to be written --
@@ -475,7 +530,6 @@ class EarlyStopping:
         # random suffix already makes that vanishingly unlikely.
         self.path.parent.mkdir(parents=True, exist_ok=True)
         torch.save(model, self.path)
-        self.val_loss_min = val_loss
 
     def get_best(self) -> torch.nn.Module:
         """Load the checkpoint written with `save=True` from disk."""

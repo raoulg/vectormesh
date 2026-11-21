@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.19.0
+
+### Added
+
+- **Early stopping on a metric.** `earlystop_kwargs` takes `monitor` and `mode`, as Keras and
+  Lightning do: `monitor` is `"test_loss"` (the default) or the name of a metric in
+  `metric_dict`, `mode` is `"min"` or `"max"`. To stop on accuracy:
+  `earlystop_kwargs={"monitor": "Accuracy", "mode": "max", "patience": 10}`. The best epoch,
+  the restored weights and `TrainResult.epoch` follow the monitored quantity. `mode` defaults to
+  `"min"` for `"test_loss"` and is required for a metric. A `monitor` that is not one of the
+  Trainer's metrics raises `VectorMeshError` when the `Trainer` is built.
+- `EarlyStopping.monitor` and `EarlyStopping.mode`.
+
+### Changed
+
+- `delta` is a minimum improvement in the monitored direction: in `"max"` mode a value must
+  exceed the best by more than `delta`.
+- `EarlyStopping.best_loss` is `EarlyStopping.best_value`, and `EarlyStopping.__call__` takes
+  `(value, model)`; `val_loss_min` is gone.
+- `ReduceLROnPlateau` still steps on the validation loss, whatever early stopping monitors.
+
 ## 0.18.0
 
 ### Fixed

@@ -72,8 +72,9 @@ availability. For a head this small, `cpu` is often competitive — the data is 
 `metric_dict` of the model that `trainer.model` holds afterwards, which is what lets a ray trial
 call `Trainer` directly and read its result off the return value; see
 [§9](09-architecture-search.md). Without early stopping that is the last epoch. With early
-stopping it is the epoch with the lowest validation loss: its weights are copied in memory at every
-improvement and put back into `trainer.model` when the loop ends, also with `save=False`.
+stopping it is the best epoch by the quantity early stopping monitors — the validation loss, or a
+metric (§6.4): its weights are copied in memory at every improvement and put back into
+`trainer.model` when the loop ends, also with `save=False`.
 `result.stopped_epoch` is the last epoch that ran, so a notebook can report both:
 
 ```python
@@ -135,6 +136,24 @@ settings = TrainerSettings(
   writes every improvement to `log_dir / "checkpoint.pt"`. Patience must exceed
   the scheduler's patience, or you stop before the reduced learning rate has a chance to help — the
   scripts use 40 vs 20.
+
+  **What it watches.** `monitor` names the quantity, `mode` its direction, as in Keras and
+  Lightning. The default is `monitor="test_loss"`, `mode="min"`. To watch a metric, name it as it
+  appears in `metric_dict` — its `str()`, `"Accuracy"` or `"F1-micro"` — and say which way is
+  better; a metric has no default `mode`, since its name does not say:
+
+  ```python
+  earlystop_kwargs={"monitor": "Accuracy", "mode": "max", "patience": 10}
+  ```
+
+  The best epoch, the weights `loop()` restores and the `TrainResult` it returns then follow the
+  metric. That matters when the two diverge: a classifier can grow overconfident, so its
+  validation loss rises from an early epoch on while its accuracy keeps improving. `delta` is the
+  minimum improvement in the monitored direction (an accuracy must rise by more than `delta`). A
+  `monitor` that is neither `"test_loss"` nor one of `settings.metrics` raises a
+  `VectorMeshError` when the `Trainer` is built. The `ReduceLROnPlateau` scheduler keeps stepping
+  on the validation loss whatever early stopping monitors; Keras and Lightning likewise give the
+  scheduler a monitor of its own.
 - `scheduler_kwargs` — only used if `Trainer(..., scheduler=...)` is also passed; defaults to
   `ReduceLROnPlateau`'s own `{"factor": 0.1, "patience": 10}` if you don't override it. Worth
   passing explicitly anyway, the same way `earlystop_kwargs` is required — so the value in use is

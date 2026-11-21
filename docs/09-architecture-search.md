@@ -222,10 +222,12 @@ results = tuner.fit()
 `result` is the trial's best epoch by validation loss, not its last one: `loop()` ends on that
 epoch's weights and reports its metrics, and `result.stopped_epoch` says where the trial stopped.
 
-Worth knowing: `EarlyStopping` tracks *validation loss*, not the metric you report to ray
+Worth knowing: this `EarlyStopping` tracks *validation loss*, not the metric you report to ray
 (`accuracy` here). For a classification head with `CrossEntropyLoss` the two move together
-closely enough that this rarely changes which trial wins, but if your task's loss and headline
-metric can diverge, keep that in mind when reading a search's stopping points.
+closely enough that this rarely changes which trial wins. Where your task's loss and headline
+metric can diverge, stop on the metric itself:
+`earlystop_kwargs={"monitor": "Accuracy", "mode": "max", "patience": 15}`
+([§6.4](06-training.md#64-trainersettings-worth-knowing)).
 
 The mechanism axis reads from `vectormesh.components` — `Skip → Gate → Highway → MoE` is
 exactly the ladder of increasingly expressive conditional computation from

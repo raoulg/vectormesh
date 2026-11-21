@@ -16,6 +16,7 @@ from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
 from vectormesh.training import EarlyStopping, Trainer, TrainerSettings, TrainResult
+from vectormesh.types import VectorMeshError
 
 
 def _dataloaders(
@@ -307,11 +308,15 @@ def test_custom_step_with_metrics_pays_a_second_forward_pass(tmp_path):
 
 
 def _scripted_trainer(
-    tmp_path, losses: list[float], earlystop_kwargs: dict[str, Any] | None
+    tmp_path,
+    losses: list[float],
+    earlystop_kwargs: dict[str, Any] | None,
+    accuracy: list[float] | None = None,
 ) -> Trainer:
     """A Trainer whose epoch `i` sets every weight to `i` and reports
-    `losses[i]` as validation loss and `{"epoch": i}` as metrics, so a
-    test can read off which epoch a result or a set of weights belongs to."""
+    `losses[i]` as validation loss and `{"epoch": i}` as metrics (plus
+    `"Accuracy": accuracy[i]` when given), so a test can read off which epoch
+    a result or a set of weights belongs to."""
     trainer = _trainer(tmp_path)
     trainer.settings = _settings(
         tmp_path, epochs=len(losses), earlystop_kwargs=earlystop_kwargs
@@ -331,7 +336,10 @@ def _scripted_trainer(
 
     def evalbatches() -> tuple[dict[str, float], float]:
         epoch = current["epoch"]
-        return {"epoch": float(epoch)}, losses[epoch]
+        metrics = {"epoch": float(epoch)}
+        if accuracy is not None:
+            metrics["Accuracy"] = accuracy[epoch]
+        return metrics, losses[epoch]
 
     vars(trainer).update(trainbatches=trainbatches, evalbatches=evalbatches)
     return trainer
@@ -479,3 +487,63 @@ def test_metrics_reach_tuple_outputs_concatenated(tmp_path):
     trainer.loss_fn = lambda yhat, y: nn.functional.cross_entropy(yhat[0], y)
     trainer.evalbatches()
     assert seen == [(100, 100)]
+
+
+def test_early_stop_on_a_max_mode_metric_picks_its_best_epoch(tmp_path):
+    """The loss is lowest at epoch 0 while accuracy keeps rising to epoch 3."""
+    losses = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+    accuracy = [0.50, 0.60, 0.65, 0.70, 0.69, 0.68, 0.90]  # epoch 6 never runs
+    kwargs = {"monitor": "Accuracy", "mode": "max", "patience": 2}
+    trainer = _scripted_trainer(tmp_path, losses, kwargs, accuracy=accuracy)
+    result = trainer.loop()
+
+    assert (result.epoch, result.stopped_epoch) == (3, 5)
+    assert result.metric_dict["Accuracy"] == 0.70
+    assert _weights_of(trainer.model) == {3.0}
+
+
+def test_delta_is_a_minimum_increase_in_max_mode(tmp_path):
+    accuracy = [0.50, 0.55, 0.58, 0.59, 0.60]
+    kwargs = {"monitor": "Accuracy", "mode": "max", "patience": 10, "delta": 0.04}
+    trainer = _scripted_trainer(tmp_path, [1.0] * 5, kwargs, accuracy=accuracy)
+    result = trainer.loop()
+
+    # 0.55 beats 0.50 by more than 0.04; 0.58, 0.59 do not beat 0.55 by that; 0.60 does
+    assert result.epoch == 4
+    assert _weights_of(trainer.model) == {4.0}
+
+
+def test_a_metric_monitor_without_mode_raises(tmp_path):
+    with pytest.raises(VectorMeshError, match="mode"):
+        EarlyStopping(tmp_path, monitor="Accuracy")
+
+
+def test_an_unknown_monitor_raises_when_the_trainer_is_built(tmp_path):
+    from vectormesh.components.metrics import Accuracy
+
+    train_dl, valid_dl = _dataloaders()
+    settings = _settings(
+        tmp_path,
+        metrics=[Accuracy()],
+        earlystop_kwargs={"monitor": "F1-micro", "mode": "max"},
+    )
+    with pytest.raises(VectorMeshError, match="F1-micro"):
+        Trainer(
+            model=nn.Linear(4, 2),
+            settings=settings,
+            loss_fn=nn.CrossEntropyLoss(),
+            optimizer=torch.optim.Adam,
+            traindataloader=train_dl,
+            validdataloader=valid_dl,
+            progress=False,
+        )
+
+
+def test_the_default_monitor_is_the_validation_loss_minimised(tmp_path):
+    es = EarlyStopping(tmp_path)
+    assert (es.monitor, es.mode) == ("test_loss", "min")
+    losses = [1.0, 0.5, 0.7, 0.8, 0.9]
+    accuracy = [0.1, 0.2, 0.3, 0.4, 0.5]  # rising, but not monitored
+    trainer = _scripted_trainer(tmp_path, losses, {"patience": 3}, accuracy=accuracy)
+    result = trainer.loop()
+    assert (result.epoch, result.stopped_epoch) == (1, 4)
